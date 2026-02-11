@@ -1,6 +1,6 @@
 use anyhow::Result;
 use axum::{routing::get, Router};
-use flux::api::{create_router, ws_handler, AppState, WsAppState};
+use flux::api::{create_query_router, create_router, ws_handler, AppState, QueryAppState, WsAppState};
 use flux::nats::{EventPublisher, NatsClient, NatsConfig};
 use flux::state::StateEngine;
 use std::sync::Arc;
@@ -50,13 +50,19 @@ async fn main() -> Result<()> {
     let ingestion_router = create_router(ingestion_state);
 
     // Create WebSocket API router
-    let ws_state = Arc::new(WsAppState { state_engine });
+    let ws_state = Arc::new(WsAppState {
+        state_engine: Arc::clone(&state_engine),
+    });
     let ws_router = Router::new()
         .route("/api/ws", get(ws_handler))
         .with_state(ws_state);
 
+    // Create Query API router
+    let query_state = Arc::new(QueryAppState { state_engine });
+    let query_router = create_query_router(query_state);
+
     // Combine routers
-    let app = ingestion_router.merge(ws_router);
+    let app = ingestion_router.merge(ws_router).merge(query_router);
 
     let addr = format!("0.0.0.0:{}", port);
     info!("Starting HTTP server on {}", addr);

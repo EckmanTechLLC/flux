@@ -20,17 +20,17 @@ services:
           cpus: '0.5'
           memory: 256M
 
-  # Flux Service - Control plane (validation, authorization, stream management)
-  flux-service:
+  # Flux Service - State engine + APIs
+  flux:
     build:
-      context: ./flux-service
+      context: .
       dockerfile: Dockerfile
-    container_name: flux-service
+    container_name: flux
     environment:
       - NATS_URL=nats://nats:4222
-      - PORT=8090
+      - PORT=3000
     ports:
-      - "8090:8090"
+      - "3000:3000"
     networks:
       - flux-network
     depends_on:
@@ -39,8 +39,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '0.5'
-          memory: 256M
+          cpus: '1.0'
+          memory: 512M
 
 networks:
   flux-network:

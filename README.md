@@ -56,7 +56,102 @@ Previous work (event backbone approach) archived in `archive/event-backbone` bra
 
 ## Quick Start
 
-*Coming soon - state engine implementation in progress*
+### Prerequisites
+
+- Docker and Docker Compose
+- (Optional) curl for testing
+
+### Running Flux
+
+```bash
+# Start Flux + NATS
+docker-compose up -d
+
+# Check logs
+docker-compose logs -f flux
+
+# Stop services
+docker-compose down
+```
+
+Flux will be available at `http://localhost:3000`.
+
+### Publishing Events
+
+```bash
+# POST event to Flux
+curl -X POST http://localhost:3000/api/events \
+  -H "Content-Type: application/json" \
+  -d '{
+    "stream": "sensors",
+    "source": "sensor-01",
+    "key": "temp-sensor-01",
+    "schema": "temperature.v1",
+    "payload": {
+      "temperature": 22.5,
+      "unit": "celsius"
+    }
+  }'
+```
+
+### Querying State
+
+```bash
+# Get all entities
+curl http://localhost:3000/api/state/entities
+
+# Get specific entity
+curl http://localhost:3000/api/state/entities/temp-sensor-01
+```
+
+### WebSocket Subscription
+
+```javascript
+const ws = new WebSocket('ws://localhost:3000/api/ws');
+
+ws.onopen = () => {
+  // Subscribe to entity updates
+  ws.send(JSON.stringify({
+    type: 'subscribe',
+    entityId: 'temp-sensor-01'
+  }));
+};
+
+ws.onmessage = (event) => {
+  const update = JSON.parse(event.data);
+  console.log('State update:', update);
+};
+```
+
+## API Reference
+
+### Event Ingestion
+
+**POST /api/events** - Publish single event
+- Request: FluxEvent JSON
+- Response: `{"eventId": "...", "stream": "..."}`
+
+**POST /api/events/batch** - Publish multiple events
+- Request: `{"events": [...]}`
+- Response: `{"successful": N, "failed": M, "results": [...]}`
+
+### State Query
+
+**GET /api/state/entities** - List all entities
+- Response: `[{"id": "...", "properties": {...}, "lastUpdated": "..."}]`
+
+**GET /api/state/entities/:id** - Get specific entity
+- Response: `{"id": "...", "properties": {...}, "lastUpdated": "..."}`
+- Returns 404 if not found
+
+### WebSocket
+
+**GET /api/ws** - WebSocket connection for real-time state updates
+
+Messages:
+- Subscribe: `{"type": "subscribe", "entityId": "..."}`
+- Unsubscribe: `{"type": "unsubscribe", "entityId": "..."}`
+- Update: `{"type": "update", "entity": {...}}`
 
 ## License
 
