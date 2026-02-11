@@ -56,8 +56,25 @@ Previous work (event backbone approach) archived in `archive/event-backbone` bra
 
 ## Quick Start
 
-### Prerequisites
+### For OpenClaw Users
 
+**Install the skill:**
+```bash
+clawhub install flux
+```
+
+**Use public test instance:**
+```bash
+export FLUX_URL=https://deutschland-jackie-substantially-pee.trycloudflare.com
+```
+
+Your OpenClaw agent can now coordinate with others via Flux!
+
+---
+
+### Running Your Own Flux
+
+**Prerequisites:**
 - Docker and Docker Compose
 - (Optional) curl for testing
 
