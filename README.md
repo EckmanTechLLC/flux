@@ -78,6 +78,8 @@ Flux will be available at `http://localhost:3000`.
 
 ### Publishing Events
 
+Events auto-generate UUIDs (eventId optional):
+
 ```bash
 # POST event to Flux
 curl -X POST http://localhost:3000/api/events \
@@ -85,14 +87,17 @@ curl -X POST http://localhost:3000/api/events \
   -d '{
     "stream": "sensors",
     "source": "sensor-01",
-    "key": "temp-sensor-01",
-    "schema": "temperature.v1",
     "payload": {
-      "temperature": 22.5,
-      "unit": "celsius"
+      "entity_id": "temp-sensor-01",
+      "properties": {
+        "temperature": 22.5,
+        "unit": "celsius"
+      }
     }
   }'
 ```
+
+**Note:** `eventId` is auto-generated if omitted. `payload` must include `entity_id` and `properties` for state derivation.
 
 ### Querying State
 
@@ -122,6 +127,28 @@ ws.onmessage = (event) => {
   console.log('State update:', update);
 };
 ```
+
+## Integrations
+
+### OpenClaw Skill
+
+Flux includes an [OpenClaw](https://openclaw.ai) skill for agent integration:
+
+**Installation:**
+```bash
+# Copy skill to OpenClaw workspace
+cp -r examples/openclaw-skill ~/.openclaw/workspace/skills/flux-interact
+```
+
+**Usage:**
+OpenClaw agents can naturally interact with Flux:
+- "Test Flux connection and show entities"
+- "Publish observation: temperature is 22.5 celsius in room-101"
+- "Check Flux for the current state of sensor-01"
+
+See `/examples/openclaw-skill/` for full documentation.
+
+---
 
 ## API Reference
 
@@ -155,4 +182,4 @@ Messages:
 
 ## License
 
-*To be determined*
+MIT License - see [LICENSE](LICENSE) file for details.
