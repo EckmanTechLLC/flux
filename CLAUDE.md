@@ -35,7 +35,7 @@
 - [x] Git repository initialized
 - [x] Previous work archived (branch: archive/event-backbone)
 - [x] Clean slate for state engine implementation
-- [ ] ADR-001: State Engine Architecture
+- [x] ADR-001: State Engine Architecture
 - [ ] Core state engine (Rust)
 - [ ] Event ingestion layer
 - [ ] WebSocket subscription API
