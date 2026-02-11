@@ -4,7 +4,7 @@ use serde_json::json;
 #[test]
 fn test_valid_event_passes_validation() {
     let mut event = FluxEvent {
-        event_id: "".to_string(), // Will be auto-generated
+        event_id: None, // Will be auto-generated
         stream: "sensors.temperature".to_string(),
         source: "sensor-001".to_string(),
         timestamp: 1707668400000, // 2024-02-11 13:00:00 UTC
@@ -15,14 +15,14 @@ fn test_valid_event_passes_validation() {
 
     let result = event.validate_and_prepare();
     assert!(result.is_ok());
-    assert!(!event.event_id.is_empty()); // UUIDv7 was generated
-    assert_eq!(event.event_id.len(), 36); // UUID format
+    assert!(event.event_id.is_some()); // UUIDv7 was generated
+    assert_eq!(event.event_id.unwrap().len(), 36); // UUID format
 }
 
 #[test]
 fn test_missing_stream_fails() {
     let mut event = FluxEvent {
-        event_id: "".to_string(),
+        event_id: None,
         stream: "".to_string(),
         source: "sensor-001".to_string(),
         timestamp: 1707668400000,
@@ -39,7 +39,7 @@ fn test_missing_stream_fails() {
 #[test]
 fn test_missing_source_fails() {
     let mut event = FluxEvent {
-        event_id: "".to_string(),
+        event_id: None,
         stream: "sensors".to_string(),
         source: "".to_string(),
         timestamp: 1707668400000,
@@ -56,7 +56,7 @@ fn test_missing_source_fails() {
 #[test]
 fn test_invalid_stream_format_fails() {
     let mut event = FluxEvent {
-        event_id: "".to_string(),
+        event_id: None,
         stream: "Sensors.Temp".to_string(), // Uppercase not allowed
         source: "sensor-001".to_string(),
         timestamp: 1707668400000,
@@ -76,7 +76,7 @@ fn test_invalid_stream_format_fails() {
 #[test]
 fn test_invalid_timestamp_fails() {
     let mut event = FluxEvent {
-        event_id: "".to_string(),
+        event_id: None,
         stream: "sensors".to_string(),
         source: "sensor-001".to_string(),
         timestamp: -1, // Negative timestamp
@@ -93,7 +93,7 @@ fn test_invalid_timestamp_fails() {
 #[test]
 fn test_zero_timestamp_fails() {
     let mut event = FluxEvent {
-        event_id: "".to_string(),
+        event_id: None,
         stream: "sensors".to_string(),
         source: "sensor-001".to_string(),
         timestamp: 0,
@@ -110,7 +110,7 @@ fn test_zero_timestamp_fails() {
 #[test]
 fn test_payload_not_object_fails() {
     let mut event = FluxEvent {
-        event_id: "".to_string(),
+        event_id: None,
         stream: "sensors".to_string(),
         source: "sensor-001".to_string(),
         timestamp: 1707668400000,
@@ -127,7 +127,7 @@ fn test_payload_not_object_fails() {
 #[test]
 fn test_payload_array_fails() {
     let mut event = FluxEvent {
-        event_id: "".to_string(),
+        event_id: None,
         stream: "sensors".to_string(),
         source: "sensor-001".to_string(),
         timestamp: 1707668400000,
@@ -144,7 +144,7 @@ fn test_payload_array_fails() {
 #[test]
 fn test_null_payload_fails() {
     let mut event = FluxEvent {
-        event_id: "".to_string(),
+        event_id: None,
         stream: "sensors".to_string(),
         source: "sensor-001".to_string(),
         timestamp: 1707668400000,
@@ -161,7 +161,7 @@ fn test_null_payload_fails() {
 #[test]
 fn test_uuidv7_generation() {
     let mut event1 = FluxEvent {
-        event_id: "".to_string(),
+        event_id: None,
         stream: "sensors".to_string(),
         source: "sensor-001".to_string(),
         timestamp: 1707668400000,
@@ -171,7 +171,7 @@ fn test_uuidv7_generation() {
     };
 
     let mut event2 = FluxEvent {
-        event_id: "".to_string(),
+        event_id: None,
         stream: "sensors".to_string(),
         source: "sensor-001".to_string(),
         timestamp: 1707668400000,
@@ -184,22 +184,22 @@ fn test_uuidv7_generation() {
     event2.validate_and_prepare().unwrap();
 
     // Both should have generated IDs
-    assert!(!event1.event_id.is_empty());
-    assert!(!event2.event_id.is_empty());
+    assert!(event1.event_id.is_some());
+    assert!(event2.event_id.is_some());
 
     // IDs should be different
     assert_ne!(event1.event_id, event2.event_id);
 
     // IDs should be valid UUID format
-    assert_eq!(event1.event_id.len(), 36);
-    assert_eq!(event2.event_id.len(), 36);
+    assert_eq!(event1.event_id.as_ref().unwrap().len(), 36);
+    assert_eq!(event2.event_id.as_ref().unwrap().len(), 36);
 }
 
 #[test]
 fn test_existing_event_id_preserved() {
     let existing_id = "01933e4b-8e6f-7890-abcd-ef1234567890";
     let mut event = FluxEvent {
-        event_id: existing_id.to_string(),
+        event_id: Some(existing_id.to_string()),
         stream: "sensors".to_string(),
         source: "sensor-001".to_string(),
         timestamp: 1707668400000,
@@ -211,13 +211,13 @@ fn test_existing_event_id_preserved() {
     event.validate_and_prepare().unwrap();
 
     // Existing ID should be preserved
-    assert_eq!(event.event_id, existing_id);
+    assert_eq!(event.event_id.as_ref().unwrap(), existing_id);
 }
 
 #[test]
 fn test_optional_fields() {
     let mut event = FluxEvent {
-        event_id: "".to_string(),
+        event_id: None,
         stream: "sensors".to_string(),
         source: "sensor-001".to_string(),
         timestamp: 1707668400000,
@@ -233,7 +233,7 @@ fn test_optional_fields() {
 #[test]
 fn test_serde_serialization() {
     let event = FluxEvent {
-        event_id: "01933e4b-8e6f-7890-abcd-ef1234567890".to_string(),
+        event_id: Some("01933e4b-8e6f-7890-abcd-ef1234567890".to_string()),
         stream: "sensors.temperature".to_string(),
         source: "sensor-001".to_string(),
         timestamp: 1707668400000,
@@ -254,7 +254,7 @@ fn test_serde_serialization() {
 #[test]
 fn test_serde_skip_none_fields() {
     let event = FluxEvent {
-        event_id: "01933e4b-8e6f-7890-abcd-ef1234567890".to_string(),
+        event_id: Some("01933e4b-8e6f-7890-abcd-ef1234567890".to_string()),
         stream: "sensors".to_string(),
         source: "sensor-001".to_string(),
         timestamp: 1707668400000,

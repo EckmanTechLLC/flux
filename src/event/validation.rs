@@ -70,8 +70,8 @@ pub fn validate_and_prepare(event: &mut FluxEvent) -> Result<(), ValidationError
     }
 
     // Generate UUIDv7 if missing or empty
-    if event.event_id.is_empty() {
-        event.event_id = Uuid::now_v7().to_string();
+    if event.event_id.is_none() || event.event_id.as_ref().map_or(false, |id| id.is_empty()) {
+        event.event_id = Some(Uuid::now_v7().to_string());
     }
 
     Ok(())

@@ -103,7 +103,7 @@ impl StateEngine {
             Some(id) => id,
             None => {
                 warn!(
-                    event_id = %event.event_id,
+                    event_id = %event.event_id.as_ref().unwrap(),
                     "Event payload missing 'entity_id' field, skipping"
                 );
                 return;
@@ -115,7 +115,7 @@ impl StateEngine {
             Some(props) => props,
             None => {
                 warn!(
-                    event_id = %event.event_id,
+                    event_id = %event.event_id.as_ref().unwrap(),
                     entity_id = %entity_id,
                     "Event payload missing 'properties' object, skipping"
                 );

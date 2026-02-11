@@ -16,7 +16,8 @@ pub struct FluxEvent {
     /// UUIDv7 identifier (time-ordered, globally unique)
     /// Auto-generated if not provided
     #[serde(rename = "eventId")]
-    pub event_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub event_id: Option<String>,
 
     /// Logical stream/namespace (e.g., "sensors.temperature")
     /// Must be lowercase with optional dot separators

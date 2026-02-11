@@ -72,7 +72,7 @@ async fn publish_event(
         .map_err(|e| AppError::ValidationError(e.to_string()))?;
 
     info!(
-        event_id = %event.event_id,
+        event_id = %event.event_id.as_ref().unwrap(),
         stream = %event.stream,
         source = %event.source,
         "Ingesting event"
@@ -89,7 +89,7 @@ async fn publish_event(
         })?;
 
     Ok(Json(EventResponse {
-        event_id: event.event_id.clone(),
+        event_id: event.event_id.clone().unwrap(),
         stream: event.stream.clone(),
     }))
 }
@@ -128,16 +128,16 @@ async fn publish_batch(
             Ok(_) => {
                 successful += 1;
                 results.push(BatchResult {
-                    event_id: Some(event.event_id.clone()),
+                    event_id: event.event_id.clone(),
                     stream: Some(event.stream.clone()),
                     error: None,
                 });
             }
             Err(e) => {
-                error!(error = %e, event_id = %event.event_id, "Failed to publish event");
+                error!(error = %e, event_id = %event.event_id.as_ref().unwrap(), "Failed to publish event");
                 failed += 1;
                 results.push(BatchResult {
-                    event_id: Some(event.event_id.clone()),
+                    event_id: event.event_id.clone(),
                     stream: Some(event.stream.clone()),
                     error: Some(format!("publish failed: {}", e)),
                 });

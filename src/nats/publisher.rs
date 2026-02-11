@@ -25,7 +25,7 @@ impl EventPublisher {
             .context("Failed to serialize event to JSON")?;
 
         debug!(
-            event_id = %event.event_id,
+            event_id = %event.event_id.as_ref().unwrap(),
             stream = %event.stream,
             subject = %subject,
             "Publishing event to NATS"
