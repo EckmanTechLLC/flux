@@ -1,0 +1,50 @@
+version: '3.8'
+
+services:
+  # NATS with JetStream - Event backbone
+  nats:
+    image: nats:latest
+    container_name: flux-nats
+    command: ["-js", "-m", "8223", "-sd", "/data"]
+    ports:
+      - "4223:4222"  # Client port (using 4223 to avoid conflict with flux-reactor)
+      - "8223:8223"  # Monitoring port
+    volumes:
+      - nats-data:/data
+    networks:
+      - flux-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+
+  # Flux Service - Control plane (validation, authorization, stream management)
+  flux-service:
+    build:
+      context: ./flux-service
+      dockerfile: Dockerfile
+    container_name: flux-service
+    environment:
+      - NATS_URL=nats://nats:4222
+      - PORT=8090
+    ports:
+      - "8090:8090"
+    networks:
+      - flux-network
+    depends_on:
+      - nats
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+
+networks:
+  flux-network:
+    driver: bridge
+
+volumes:
+  nats-data:
