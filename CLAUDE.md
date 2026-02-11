@@ -38,7 +38,7 @@
 - [x] ADR-001: State Engine Architecture
 - [x] Task 1: Project structure & dependencies
 - [x] Task 2: Event model & validation
-- [ ] Task 3: State engine core
+- [x] Task 3: State engine core
 - [ ] Task 4: Event ingestion API
 - [ ] Task 5: WebSocket subscription API
 - [ ] Task 6: HTTP query API & integration
