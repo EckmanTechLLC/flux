@@ -1,0 +1,42 @@
+[package]
+name = "flux"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# Async runtime
+tokio = { version = "1.43", features = ["full"] }
+
+# Web framework
+axum = "0.7"
+
+# NATS client
+async-nats = "0.37"
+
+# Concurrent HashMap (lock-free)
+dashmap = "6.1"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# UUID generation (v7 time-ordered)
+uuid = { version = "1.11", features = ["v7", "serde"] }
+
+# Timestamps
+chrono = { version = "0.4", features = ["serde"] }
+
+# Error handling
+anyhow = "1.0"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[lib]
+name = "flux"
+path = "src/lib.rs"
+
+[[bin]]
+name = "flux"
+path = "src/main.rs"

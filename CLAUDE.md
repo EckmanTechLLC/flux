@@ -31,15 +31,17 @@
 
 ## Current Status
 
-### Fresh Start (IN PROGRESS 🟡)
+### Phase 1: State Engine MVP (IN PROGRESS 🟡)
 - [x] Git repository initialized
 - [x] Previous work archived (branch: archive/event-backbone)
 - [x] Clean slate for state engine implementation
 - [x] ADR-001: State Engine Architecture
-- [ ] Core state engine (Rust)
-- [ ] Event ingestion layer
-- [ ] WebSocket subscription API
-- [ ] Client examples
+- [x] Task 1: Project structure & dependencies
+- [ ] Task 2: Event model & validation
+- [ ] Task 3: State engine core
+- [ ] Task 4: Event ingestion API
+- [ ] Task 5: WebSocket subscription API
+- [ ] Task 6: HTTP query API & integration
 
 **Infrastructure Ports:**
 - NATS (internal): 4222
