@@ -37,7 +37,7 @@
 - [x] Clean slate for state engine implementation
 - [x] ADR-001: State Engine Architecture
 - [x] Task 1: Project structure & dependencies
-- [ ] Task 2: Event model & validation
+- [x] Task 2: Event model & validation
 - [ ] Task 3: State engine core
 - [ ] Task 4: Event ingestion API
 - [ ] Task 5: WebSocket subscription API
