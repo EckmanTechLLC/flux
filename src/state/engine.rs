@@ -1,10 +1,15 @@
+use crate::event::FluxEvent;
 use crate::state::entity::{Entity, StateUpdate};
+use anyhow::{Context, Result};
+use async_nats::jetstream;
 use chrono::Utc;
 use dashmap::DashMap;
+use futures::StreamExt;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::broadcast;
+use tracing::{error, info, warn};
 
 /// State engine maintains in-memory world state
 pub struct StateEngine {
@@ -80,6 +85,107 @@ impl StateEngine {
     /// Subscribe to state updates
     pub fn subscribe(&self) -> broadcast::Receiver<StateUpdate> {
         self.state_tx.subscribe()
+    }
+
+    /// Process a single event and update state
+    ///
+    /// Expects payload format:
+    /// {
+    ///   "entity_id": "...",
+    ///   "properties": {
+    ///     "prop1": value1,
+    ///     "prop2": value2
+    ///   }
+    /// }
+    pub fn process_event(&self, event: &FluxEvent) {
+        // Extract entity_id from payload
+        let entity_id = match event.payload.get("entity_id").and_then(|v| v.as_str()) {
+            Some(id) => id,
+            None => {
+                warn!(
+                    event_id = %event.event_id,
+                    "Event payload missing 'entity_id' field, skipping"
+                );
+                return;
+            }
+        };
+
+        // Extract properties object
+        let properties = match event.payload.get("properties").and_then(|v| v.as_object()) {
+            Some(props) => props,
+            None => {
+                warn!(
+                    event_id = %event.event_id,
+                    entity_id = %entity_id,
+                    "Event payload missing 'properties' object, skipping"
+                );
+                return;
+            }
+        };
+
+        // Update each property
+        for (property_name, property_value) in properties {
+            self.update_property(entity_id, property_name, property_value.clone());
+        }
+    }
+
+    /// Run NATS subscriber to process events and update state
+    ///
+    /// This method subscribes to "flux.events.>" and processes all events,
+    /// updating in-memory state and broadcasting changes.
+    pub async fn run_subscriber(self: Arc<Self>, jetstream: jetstream::Context) -> Result<()> {
+        info!("Starting state engine NATS subscriber");
+
+        // Get or create consumer
+        let stream = jetstream
+            .get_stream("FLUX_EVENTS")
+            .await
+            .context("Failed to get FLUX_EVENTS stream")?;
+
+        let consumer = stream
+            .get_or_create_consumer(
+                "flux-state-engine",
+                async_nats::jetstream::consumer::pull::Config {
+                    durable_name: Some("flux-state-engine".to_string()),
+                    filter_subject: "flux.events.>".to_string(),
+                    ..Default::default()
+                },
+            )
+            .await
+            .context("Failed to create consumer")?;
+
+        info!("State engine consumer created, processing events...");
+
+        // Process messages
+        let mut messages = consumer.messages().await?;
+
+        while let Some(msg) = messages.next().await {
+            match msg {
+                Ok(msg) => {
+                    // Deserialize event
+                    match serde_json::from_slice::<FluxEvent>(&msg.payload) {
+                        Ok(event) => {
+                            self.process_event(&event);
+                            // Acknowledge message
+                            if let Err(e) = msg.ack().await {
+                                error!(error = %e, "Failed to acknowledge message");
+                            }
+                        }
+                        Err(e) => {
+                            error!(error = %e, "Failed to deserialize event, skipping");
+                            // Acknowledge to prevent redelivery of malformed messages
+                            let _ = msg.ack().await;
+                        }
+                    }
+                }
+                Err(e) => {
+                    error!(error = %e, "Error receiving message");
+                }
+            }
+        }
+
+        warn!("State engine subscriber stream ended");
+        Ok(())
     }
 }
 

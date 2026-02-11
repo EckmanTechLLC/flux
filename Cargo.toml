@@ -6,9 +6,10 @@ edition = "2021"
 [dependencies]
 # Async runtime
 tokio = { version = "1.43", features = ["full"] }
+tokio-stream = "0.1"
 
 # Web framework
-axum = "0.7"
+axum = { version = "0.7", features = ["ws"] }
 
 # NATS client
 async-nats = "0.37"
@@ -19,6 +20,7 @@ dashmap = "6.1"
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+futures = "0.3"
 
 # UUID generation (v7 time-ordered)
 uuid = { version = "1.11", features = ["v7", "serde"] }
