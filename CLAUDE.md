@@ -46,7 +46,7 @@
 - [x] Task 8: Documentation (state model, architecture, API reference)
 
 **Deployments:**
-- Public test instance: https://flux.eckman-tech.com (Cloudflare tunnel + systemd)
+- Private test instance on etl-bot (Cloudflare tunnel + systemd, contact for access)
 - OpenClaw skill published to ClawHub registry (flux@1.0.0)
 - Arc agent coordinating through Flux on etl-bot
 

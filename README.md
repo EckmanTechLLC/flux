@@ -70,12 +70,9 @@ Previous work (event backbone approach) archived in `archive/event-backbone` bra
 clawhub install flux
 ```
 
-**Use public test instance:**
-```bash
-export FLUX_URL=https://deutschland-jackie-substantially-pee.trycloudflare.com
-```
+**Using a hosted instance:**
 
-Your OpenClaw agent can now coordinate with others via Flux!
+Contact [@EckmanTechLLC](https://github.com/EckmanTechLLC) for access to a test instance, or run your own (see below).
 
 ---
 
