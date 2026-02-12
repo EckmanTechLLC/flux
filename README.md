@@ -43,9 +43,16 @@ Previous work (event backbone approach) archived in `archive/event-backbone` bra
 
 ## Documentation
 
-- `FLUX-DESIGN.md` - Complete vision and design principles
-- `CLAUDE.md` - Development context for Claude Code
-- `docs/workflow/` - Multi-session development workflow
+**Core Docs:**
+- [State Model](docs/state-model.md) - Entity/property model and event-to-state derivation
+- [Architecture](docs/architecture.md) - System architecture and components
+- [API Reference](docs/api.md) - HTTP and WebSocket API documentation
+
+**Design & Context:**
+- [FLUX-DESIGN.md](FLUX-DESIGN.md) - Complete vision and design principles
+- [CLAUDE.md](CLAUDE.md) - Development context for Claude Code
+- [Architecture Decision Records](docs/decisions/) - Key design decisions
+- [Development Workflow](docs/workflow/) - Multi-session workflow
 
 ## Technology
 
@@ -167,35 +174,20 @@ See `/examples/openclaw-skill/` for full documentation.
 
 ---
 
-## API Reference
+## API Summary
 
-### Event Ingestion
+**Event Ingestion:**
+- `POST /api/events` - Publish single event
+- `POST /api/events/batch` - Publish multiple events
 
-**POST /api/events** - Publish single event
-- Request: FluxEvent JSON
-- Response: `{"eventId": "...", "stream": "..."}`
+**State Query:**
+- `GET /api/state/entities` - List all entities
+- `GET /api/state/entities/:id` - Get specific entity
 
-**POST /api/events/batch** - Publish multiple events
-- Request: `{"events": [...]}`
-- Response: `{"successful": N, "failed": M, "results": [...]}`
+**Real-time Updates:**
+- `GET /api/ws` - WebSocket subscription
 
-### State Query
-
-**GET /api/state/entities** - List all entities
-- Response: `[{"id": "...", "properties": {...}, "lastUpdated": "..."}]`
-
-**GET /api/state/entities/:id** - Get specific entity
-- Response: `{"id": "...", "properties": {...}, "lastUpdated": "..."}`
-- Returns 404 if not found
-
-### WebSocket
-
-**GET /api/ws** - WebSocket connection for real-time state updates
-
-Messages:
-- Subscribe: `{"type": "subscribe", "entityId": "..."}`
-- Unsubscribe: `{"type": "unsubscribe", "entityId": "..."}`
-- Update: `{"type": "update", "entity": {...}}`
+For detailed API documentation with examples, see [API Reference](docs/api.md).
 
 ## License
 

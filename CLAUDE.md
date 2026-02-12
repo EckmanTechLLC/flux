@@ -31,7 +31,7 @@
 
 ## Current Status
 
-### Phase 1: State Engine MVP (COMPLETE ✅)
+### Phase 1: State Engine MVP (COMPLETE ✅ 2026-02-11)
 - [x] Git repository initialized
 - [x] Previous work archived (branch: archive/event-backbone)
 - [x] Clean slate for state engine implementation
@@ -42,6 +42,13 @@
 - [x] Task 4: Event ingestion API
 - [x] Task 5: WebSocket subscription API
 - [x] Task 6: HTTP query API & integration
+- [x] Task 7: Python client examples (publish, subscribe, query)
+- [x] Task 8: Documentation (state model, architecture, API reference)
+
+**Deployments:**
+- Public test instance: https://flux.eckman-tech.com (Cloudflare tunnel + systemd)
+- OpenClaw skill published to ClawHub registry (flux@1.0.0)
+- Arc agent coordinating through Flux on etl-bot
 
 **Infrastructure Ports:**
 - NATS (internal): 4222
