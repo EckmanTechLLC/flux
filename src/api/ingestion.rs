@@ -1,8 +1,10 @@
+use crate::api::auth_middleware::{authorize_event, AuthError};
 use crate::event::FluxEvent;
+use crate::namespace::NamespaceRegistry;
 use crate::nats::EventPublisher;
 use axum::{
     extract::State,
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     response::{IntoResponse, Json, Response},
     routing::post,
     Router,
@@ -15,6 +17,8 @@ use tracing::{error, info};
 #[derive(Clone)]
 pub struct AppState {
     pub event_publisher: EventPublisher,
+    pub namespace_registry: Arc<NamespaceRegistry>,
+    pub auth_enabled: bool,
 }
 
 /// Success response for event ingestion
@@ -64,12 +68,21 @@ pub fn create_router(state: AppState) -> Router {
 /// POST /api/events - Publish single event
 async fn publish_event(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Json(mut event): Json<FluxEvent>,
 ) -> Result<Json<EventResponse>, AppError> {
     // Validate and prepare event (generates UUIDv7 if needed)
     event
         .validate_and_prepare()
         .map_err(|e| AppError::ValidationError(e.to_string()))?;
+
+    // Authorize event (if auth enabled)
+    authorize_event(
+        &headers,
+        &event,
+        &state.namespace_registry,
+        state.auth_enabled,
+    )?;
 
     info!(
         event_id = %event.event_id.as_ref().unwrap(),
@@ -97,6 +110,7 @@ async fn publish_event(
 /// POST /api/events/batch - Publish multiple events
 async fn publish_batch(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Json(mut request): Json<BatchRequest>,
 ) -> Result<Json<BatchResponse>, AppError> {
     if request.events.is_empty() {
@@ -119,6 +133,22 @@ async fn publish_batch(
                 event_id: None,
                 stream: Some(event.stream.clone()),
                 error: Some(format!("validation failed: {}", e)),
+            });
+            continue;
+        }
+
+        // Authorize event (if auth enabled)
+        if let Err(e) = authorize_event(
+            &headers,
+            event,
+            &state.namespace_registry,
+            state.auth_enabled,
+        ) {
+            failed += 1;
+            results.push(BatchResult {
+                event_id: event.event_id.clone(),
+                stream: Some(event.stream.clone()),
+                error: Some(format!("authorization failed: {}", e)),
             });
             continue;
         }
@@ -156,6 +186,8 @@ async fn publish_batch(
 enum AppError {
     ValidationError(String),
     PublishError(String),
+    Unauthorized(String),
+    Forbidden(String),
 }
 
 impl IntoResponse for AppError {
@@ -163,6 +195,8 @@ impl IntoResponse for AppError {
         let (status, error_message) = match self {
             AppError::ValidationError(msg) => (StatusCode::BAD_REQUEST, msg),
             AppError::PublishError(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg),
+            AppError::Unauthorized(msg) => (StatusCode::UNAUTHORIZED, msg),
+            AppError::Forbidden(msg) => (StatusCode::FORBIDDEN, msg),
         };
 
         let body = Json(ErrorResponse {
@@ -170,5 +204,16 @@ impl IntoResponse for AppError {
         });
 
         (status, body).into_response()
+    }
+}
+
+impl From<AuthError> for AppError {
+    fn from(e: AuthError) -> Self {
+        match e {
+            AuthError::InvalidToken(msg) => AppError::Unauthorized(msg),
+            AuthError::InvalidEntityId(msg) => AppError::Unauthorized(msg),
+            AuthError::NamespaceNotFound(msg) => AppError::Unauthorized(msg),
+            AuthError::Forbidden(msg) => AppError::Forbidden(msg),
+        }
     }
 }

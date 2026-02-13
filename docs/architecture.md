@@ -101,6 +101,159 @@ Flux is a **persistent, shared, event-sourced world state engine**. It ingests e
 
 ---
 
+## Persistence & Recovery
+
+**Status:** Implemented (Phase 2)
+
+Flux uses snapshot-based persistence with event replay for fast recovery and durability.
+
+### Snapshot Strategy
+
+**Format:** JSON compressed with gzip (`.json.gz`)
+
+**Structure:**
+```json
+{
+  "snapshot_version": "1",
+  "created_at": "2026-02-12T10:30:00Z",
+  "sequence_number": 12345,
+  "entity_count": 1000,
+  "entities": {
+    "entity_id": {
+      "id": "entity_id",
+      "properties": {"key": "value"},
+      "last_updated": "2026-02-12T10:29:55Z"
+    }
+  }
+}
+```
+
+**Location:** `/var/lib/flux/snapshots/`
+**Naming:** `snapshot-{timestamp}-seq{sequence}.json.gz`
+**Frequency:** Configurable (default: 5 minutes)
+**Retention:** Keep last N snapshots (default: 10)
+
+**Why JSON:**
+- Human-readable (debugging, inspection)
+- Schema evolution (add fields without breaking)
+- Good-enough performance with gzip compression
+
+**Atomicity:**
+- Write to `.tmp` file, fsync, then atomic rename
+- No partial snapshots visible
+- Safe for concurrent reads
+
+### Recovery Flow
+
+**On startup:**
+1. Find latest snapshot in directory
+2. Load snapshot into StateEngine (populate DashMap)
+3. Get snapshot sequence number (N)
+4. Connect to NATS consumer starting at sequence N+1
+5. Replay all events since snapshot
+6. Switch to real-time mode once caught up
+7. Start periodic snapshot timer
+
+**Cold start (no snapshot):**
+- Start NATS consumer from beginning (sequence 0)
+- Replay all events to rebuild state
+- Continue to real-time mode
+
+**Performance:**
+- Snapshot load: ~2 seconds (100k entities)
+- Event replay: 5 minutes @ 10k events/sec = ~7 seconds total
+- Target: <10 seconds recovery time ✅
+
+---
+
+## Authentication & Multi-tenancy
+
+**Status:** Implemented (Phase 3)
+
+Flux supports two deployment modes with different trust models.
+
+### Deployment Modes
+
+**Internal Mode** (`auth_enabled = false`, default):
+- No authentication required
+- Simple entity IDs (`sensor-01`, `arc-01`)
+- Trusted environment (VPN, internal network)
+- Zero friction for internal use
+
+**Public Mode** (`auth_enabled = true`):
+- Token-based write authorization
+- Namespaced entity IDs (`matt/sensor-01`)
+- Open reading (queries/subscriptions require no auth)
+- Multi-tenant (shared Flux instance)
+
+### Namespace Model
+
+**Registration:**
+```
+User → POST /api/namespaces {"name": "matt"}
+Flux → Validates uniqueness, generates system ID and token
+Flux → Returns {namespace_id: "ns_7x9f2a", name: "matt", token: "uuid"}
+```
+
+**Storage:** In-memory registry (`DashMap<String, Namespace>`)
+
+**Namespace structure:**
+- `id`: System-generated (`ns_{random}`)
+- `name`: User-chosen (3-32 chars, `[a-z0-9-_]`)
+- `token`: UUID v4 bearer token
+- `created_at`: Registration timestamp
+
+### Authorization Flow
+
+**Write enforcement (event ingestion only):**
+```
+POST /api/events
+  ↓
+Extract Authorization header
+  ↓
+Parse entity_id → extract namespace
+  ↓
+Validate token owns namespace
+  ↓
+Allow/Deny event ingestion
+```
+
+**Read operations (always open):**
+- `GET /api/state/entities` - No auth required
+- WebSocket subscriptions - No auth required
+- Core principle: "The world is open for observation"
+
+### Query Filtering
+
+**Supported filters:**
+- `?namespace=matt` - Filter by namespace
+- `?prefix=matt/sensor` - Filter by entity ID prefix
+
+**Implementation:** String matching on entity IDs (domain-agnostic)
+
+### Configuration
+
+```toml
+[auth]
+enabled = false  # Default: internal mode
+namespace_storage = "memory"
+
+[namespace]
+name_pattern = "^[a-z0-9-_]{3,32}$"
+```
+
+**Environment override:** `FLUX_AUTH_ENABLED=true`
+
+### Backward Compatibility
+
+Internal deployments continue working unchanged:
+- Default: `auth_enabled = false`
+- No config changes required
+- No breaking API changes
+- Opt-in to public mode when needed
+
+---
+
 ## Component Descriptions
 
 ### 1. Event Ingestion Layer

@@ -1,0 +1,20 @@
+Flux UI
+
+• Single-page live visualization of Flux: pipeline flow diagram with live stats, entity state grouped by type, real-time event stream via WebSocket
+• Running at http://192.168.50.106:8080 as systemd service
+System Monitors
+
+• etl-bot and arc-01 now publish to Flux (systemd service + cron job)
+• Generic flux-monitor.sh script created for any VM — 2 files, 3 commands to deploy
+• 7 VMs onboarded by Matt using public endpoint (https://flux.eckman-tech.com)
+Agent Coordination via Flux (Design Discussion)
+
+Two deployment scenarios with different trust models:
+
+1. Internal/Private Flux — No auth, no namespacing. Agents publish and subscribe freely. Entity IDs are simple strings. Trust is implicit. This works today.
+2. Public/Shared Flux — Needs two things:  • Namespace ownership: User claims a namespace (e.g. matt) on first registration. Gets a user-chosen name + auto-generated system ID (e.g. ns_7x9f2a). All entities live under namespace: matt/arc-01, matt/sensor-5.
+  • Token-based write control: Token issued at registration. Only your token can write to entities in your namespace. Reading is open — anyone can browse and subscribe to any entity.
+
+Core principle: Entities are identity (who you are, what you can do). The world is open for observation. Agents explore and choose what to monitor. No routing, no inbox, no orchestration layer needed. Flux stays agnostic — conventions live at the application level.
+
+Internal instances skip all auth/namespace — zero friction, same as today.

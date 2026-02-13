@@ -1,4 +1,5 @@
 use super::*;
+use chrono::Utc;
 use serde_json::json;
 use std::sync::Arc;
 use std::thread;
@@ -140,4 +141,121 @@ fn test_concurrent_updates_same_entity() {
     // Verify entity has all 10 properties
     let entity = engine.get_entity("shared_entity").unwrap();
     assert_eq!(entity.properties.len(), 10);
+}
+
+#[test]
+fn test_initial_sequence_is_zero() {
+    let engine = StateEngine::new();
+    assert_eq!(engine.get_last_processed_sequence(), 0);
+}
+
+#[test]
+fn test_sequence_tracking_thread_safe() {
+    let engine = Arc::new(StateEngine::new());
+    let mut handles = vec![];
+
+    // Simulate sequence reads from multiple threads
+    // (In reality, only run_subscriber updates sequence, but testing thread safety)
+    for _ in 0..10 {
+        let engine_clone = Arc::clone(&engine);
+        let handle = thread::spawn(move || {
+            // Verify concurrent reads don't panic
+            let _ = engine_clone.get_last_processed_sequence();
+        });
+        handles.push(handle);
+    }
+
+    for handle in handles {
+        handle.join().unwrap();
+    }
+
+    // Verify we can still read sequence
+    let seq = engine.get_last_processed_sequence();
+    assert_eq!(seq, 0); // Still 0 since we only read, didn't write
+}
+
+#[test]
+fn test_load_from_snapshot() {
+    use std::collections::HashMap;
+
+    let engine = StateEngine::new();
+
+    // Create snapshot data
+    let mut entities = HashMap::new();
+    let mut properties = HashMap::new();
+    properties.insert("temp".to_string(), json!(25.5));
+    properties.insert("humidity".to_string(), json!(60.0));
+
+    let entity = Entity {
+        id: "sensor_42".to_string(),
+        properties,
+        last_updated: Utc::now(),
+    };
+    entities.insert("sensor_42".to_string(), entity);
+
+    // Load snapshot
+    engine.load_from_snapshot(entities, 100);
+
+    // Verify entities loaded
+    let loaded = engine.get_entity("sensor_42").unwrap();
+    assert_eq!(loaded.id, "sensor_42");
+    assert_eq!(loaded.properties.get("temp").unwrap(), &json!(25.5));
+    assert_eq!(loaded.properties.get("humidity").unwrap(), &json!(60.0));
+
+    // Verify sequence set
+    assert_eq!(engine.get_last_processed_sequence(), 100);
+}
+
+#[test]
+fn test_load_from_snapshot_clears_existing_state() {
+    use std::collections::HashMap;
+
+    let engine = StateEngine::new();
+
+    // Create some initial state
+    engine.update_property("old_entity", "prop", json!("old"));
+
+    // Verify old entity exists
+    assert!(engine.get_entity("old_entity").is_some());
+
+    // Load snapshot (should clear old state)
+    let mut entities = HashMap::new();
+    let mut properties = HashMap::new();
+    properties.insert("new_prop".to_string(), json!("new"));
+
+    let entity = Entity {
+        id: "new_entity".to_string(),
+        properties,
+        last_updated: Utc::now(),
+    };
+    entities.insert("new_entity".to_string(), entity);
+
+    engine.load_from_snapshot(entities, 50);
+
+    // Verify old entity is gone
+    assert!(engine.get_entity("old_entity").is_none());
+
+    // Verify new entity exists
+    let loaded = engine.get_entity("new_entity").unwrap();
+    assert_eq!(loaded.id, "new_entity");
+    assert_eq!(loaded.properties.get("new_prop").unwrap(), &json!("new"));
+}
+
+#[test]
+fn test_load_from_empty_snapshot() {
+    use std::collections::HashMap;
+
+    let engine = StateEngine::new();
+
+    // Create some initial state
+    engine.update_property("entity1", "prop", json!(1));
+
+    // Load empty snapshot
+    let entities = HashMap::new();
+    engine.load_from_snapshot(entities, 0);
+
+    // Verify state is cleared
+    assert!(engine.get_entity("entity1").is_none());
+    assert_eq!(engine.get_all_entities().len(), 0);
+    assert_eq!(engine.get_last_processed_sequence(), 0);
 }

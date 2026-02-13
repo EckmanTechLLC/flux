@@ -1,7 +1,7 @@
 # Flux Context for Claude
 
-**Last Updated:** 2026-02-11
-**Current Phase:** Fresh Start - State Engine Architecture
+**Last Updated:** 2026-02-13
+**Current Phase:** Phase 3 Complete - Multi-tenancy & Authentication
 
 ---
 
@@ -44,6 +44,26 @@
 - [x] Task 6: HTTP query API & integration
 - [x] Task 7: Python client examples (publish, subscribe, query)
 - [x] Task 8: Documentation (state model, architecture, API reference)
+
+### Phase 2: Persistence & Recovery (COMPLETE ✅ 2026-02-13)
+- [x] ADR-002: Persistence and Recovery
+- [x] Task 1: Snapshot core (serialize, save/load)
+- [x] Task 2: Sequence number tracking
+- [x] Task 3: Snapshot manager (background loop, cleanup)
+- [x] Task 4: Recovery on startup (load snapshot, replay events)
+- [x] Task 5: Compression & atomicity (gzip, atomic writes)
+- [x] Task 6: Documentation & configuration
+- [x] Follow-up: Integrate SnapshotManager into main.rs (2026-02-13)
+
+### Phase 3: Multi-tenancy & Authentication (COMPLETE ✅ 2026-02-13)
+- [x] ADR-003: Multi-tenancy and Authentication
+- [x] Task 1: Namespace model & registry
+- [x] Task 2: Token generation & extraction
+- [x] Task 3: Entity ID parsing (namespace/entity)
+- [x] Task 4: Authorization middleware
+- [x] Task 5: Namespace registration API
+- [x] Task 6: Entity query filtering & discovery
+- [x] Task 7: Configuration & documentation
 
 **Deployments:**
 - Private test instance on etl-bot (Cloudflare tunnel + systemd, contact for access)

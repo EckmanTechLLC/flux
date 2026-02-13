@@ -97,6 +97,34 @@ docker-compose down
 
 Flux will be available at `http://localhost:3000`.
 
+### Configuration
+
+Flux uses `config.toml` for configuration. Default settings work for most cases.
+
+**Snapshot configuration:**
+```toml
+[snapshot]
+enabled = true
+interval_minutes = 5          # Snapshot frequency
+directory = "/var/lib/flux/snapshots"  # Snapshot storage
+keep_count = 10               # Number of snapshots to retain
+```
+
+**NATS configuration:**
+```toml
+[nats]
+url = "nats://localhost:4222"
+stream_name = "FLUX_EVENTS"
+```
+
+**Recovery configuration:**
+```toml
+[recovery]
+auto_recover = true  # Load snapshot on startup
+```
+
+Snapshots enable fast recovery (<10 seconds for 100k entities) and state persistence across restarts.
+
 ### Publishing Events
 
 Events auto-generate UUIDs (eventId optional):
@@ -148,6 +176,69 @@ ws.onmessage = (event) => {
   console.log('State update:', update);
 };
 ```
+
+## Authentication & Multi-tenancy
+
+Flux supports two deployment modes:
+
+**Internal Mode (default):**
+- No authentication required
+- Simple entity IDs (`sensor-01`)
+- For trusted environments (VPN, internal network)
+
+**Public Mode:**
+- Token-based write authorization
+- Namespaced entity IDs (`matt/sensor-01`)
+- Open reading (anyone can query/subscribe)
+
+### Enabling Authentication
+
+Set `FLUX_AUTH_ENABLED=true` in environment or `config.toml`:
+
+```toml
+[auth]
+enabled = true
+```
+
+### Using a Public Instance
+
+**1. Register a namespace:**
+```bash
+curl -X POST http://localhost:3000/api/namespaces \
+  -H "Content-Type: application/json" \
+  -d '{"name": "matt"}'
+
+# Response: {"namespace_id": "ns_7x9f2a", "name": "matt", "token": "550e8400-..."}
+```
+
+**2. Publish events with your token:**
+```bash
+curl -X POST http://localhost:3000/api/events \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer 550e8400-..." \
+  -d '{
+    "stream": "sensors",
+    "source": "sensor-01",
+    "payload": {
+      "entity_id": "matt/sensor-01",
+      "properties": {"temperature": 22.5}
+    }
+  }'
+```
+
+**3. Query entities (no auth required):**
+```bash
+# All entities
+curl http://localhost:3000/api/state/entities
+
+# Filter by namespace
+curl http://localhost:3000/api/state/entities?namespace=matt
+
+# Filter by prefix
+curl http://localhost:3000/api/state/entities?prefix=matt/sensor
+```
+
+**Note:** Tokens control writes only. Reading is always open for observation and coordination.
 
 ## Integrations
 

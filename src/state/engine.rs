@@ -7,6 +7,7 @@ use dashmap::DashMap;
 use futures::StreamExt;
 use serde_json::Value;
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use tokio::sync::broadcast;
 use tracing::{error, info, warn};
@@ -18,6 +19,9 @@ pub struct StateEngine {
 
     /// Broadcast channel for state change events
     state_tx: broadcast::Sender<StateUpdate>,
+
+    /// Last processed NATS sequence number
+    last_processed_sequence: AtomicU64,
 }
 
 impl StateEngine {
@@ -28,6 +32,7 @@ impl StateEngine {
         Self {
             entities: Arc::new(DashMap::new()),
             state_tx,
+            last_processed_sequence: AtomicU64::new(0),
         }
     }
 
@@ -87,6 +92,35 @@ impl StateEngine {
         self.state_tx.subscribe()
     }
 
+    /// Get last processed NATS sequence number
+    pub fn get_last_processed_sequence(&self) -> u64 {
+        self.last_processed_sequence.load(Ordering::SeqCst)
+    }
+
+    /// Load state from snapshot
+    ///
+    /// Clears existing state and loads entities from snapshot.
+    /// Sets last_processed_sequence to the snapshot's sequence number.
+    pub fn load_from_snapshot(&self, entities: HashMap<String, Entity>, sequence: u64) {
+        // Clear existing state
+        self.entities.clear();
+
+        // Load entities from snapshot
+        for (id, entity) in entities {
+            self.entities.insert(id, entity);
+        }
+
+        // Set sequence number
+        self.last_processed_sequence
+            .store(sequence, Ordering::SeqCst);
+
+        info!(
+            entities = self.entities.len(),
+            sequence = sequence,
+            "Loaded state from snapshot"
+        );
+    }
+
     /// Process a single event and update state
     ///
     /// Expects payload format:
@@ -133,7 +167,15 @@ impl StateEngine {
     ///
     /// This method subscribes to "flux.events.>" and processes all events,
     /// updating in-memory state and broadcasting changes.
-    pub async fn run_subscriber(self: Arc<Self>, jetstream: jetstream::Context) -> Result<()> {
+    ///
+    /// # Arguments
+    /// * `start_sequence` - Optional NATS sequence to start from (for recovery).
+    ///                      If None, starts from beginning. If Some(n), starts from n+1.
+    pub async fn run_subscriber(
+        self: Arc<Self>,
+        jetstream: jetstream::Context,
+        start_sequence: Option<u64>,
+    ) -> Result<()> {
         info!("Starting state engine NATS subscriber");
 
         // Get or create consumer
@@ -142,12 +184,31 @@ impl StateEngine {
             .await
             .context("Failed to get FLUX_EVENTS stream")?;
 
+        // Configure deliver policy based on start_sequence
+        let deliver_policy = match start_sequence {
+            Some(seq) => {
+                info!(
+                    start_sequence = seq + 1,
+                    "Recovering from snapshot, replaying events from sequence {}",
+                    seq + 1
+                );
+                async_nats::jetstream::consumer::DeliverPolicy::ByStartSequence {
+                    start_sequence: seq + 1,
+                }
+            }
+            None => {
+                info!("No snapshot, processing all events from beginning");
+                async_nats::jetstream::consumer::DeliverPolicy::All
+            }
+        };
+
         let consumer = stream
             .get_or_create_consumer(
                 "flux-state-engine",
                 async_nats::jetstream::consumer::pull::Config {
                     durable_name: Some("flux-state-engine".to_string()),
                     filter_subject: "flux.events.>".to_string(),
+                    deliver_policy,
                     ..Default::default()
                 },
             )
@@ -162,10 +223,22 @@ impl StateEngine {
         while let Some(msg) = messages.next().await {
             match msg {
                 Ok(msg) => {
+                    // Extract NATS sequence number
+                    let sequence = match msg.info() {
+                        Ok(info) => info.stream_sequence,
+                        Err(e) => {
+                            error!(error = %e, "Failed to get message info");
+                            let _ = msg.ack().await;
+                            continue;
+                        }
+                    };
+
                     // Deserialize event
                     match serde_json::from_slice::<FluxEvent>(&msg.payload) {
                         Ok(event) => {
                             self.process_event(&event);
+                            // Store sequence after successful processing
+                            self.last_processed_sequence.store(sequence, Ordering::SeqCst);
                             // Acknowledge message
                             if let Err(e) = msg.ack().await {
                                 error!(error = %e, "Failed to acknowledge message");

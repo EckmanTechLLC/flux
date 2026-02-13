@@ -12,3 +12,15 @@ pub mod nats;
 
 // Subscription management
 pub mod subscription;
+
+// Snapshot and persistence
+pub mod snapshot;
+
+// Namespace and multi-tenancy
+pub mod namespace;
+
+// Authentication and authorization
+pub mod auth;
+
+// Entity ID parsing
+pub mod entity;
