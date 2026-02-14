@@ -750,29 +750,108 @@
 </div>
 
 <script>
-const ENTITY_TYPES = {
-  sensors: { match: /^sensor-/, icon: '🌡', color: '#4fc3f7', label: 'Sensors' },
-  hosts: { match: /^host-/, icon: '🖥', color: '#ff9f43', label: 'Hosts' },
-  devices: { match: /^(giga|click-plc|sense-hat)-/, icon: '⚙', color: '#a855f7', label: 'Devices' },
-  agents: { match: /^(arc|etl)-/, icon: '🤖', color: '#6c5ce7', label: 'Agents' },
-  namespaced: { match: /^[a-zA-Z0-9]+\//, icon: '📂', color: '#00d2a0', label: 'Namespaced' },
-  loadtest: { match: /^loadtest-/, icon: '🔥', color: '#e74c3c', label: 'Load Test', hidden: true },
-  other: { match: /.*/, icon: '◇', color: '#6a6a80', label: 'Other' }
-};
+// Dynamic entity types (computed from actual entities)
+let entityTypes = {};
 
 // Filter state — hidden groups won't render
-let hiddenTypes = new Set(['loadtest']);
+let hiddenTypes = new Set();
 
 const STALE_THRESHOLD = 120000; // 2 minutes
+const MIN_GROUP_SIZE = 2; // Minimum entities to form a group
 
 let entities = {};
 let eventCount = 0;
 let lastFlowTime = 0;
 
-function classifyEntity(id) {
-  for (const [type, cfg] of Object.entries(ENTITY_TYPES)) {
-    if (type !== 'other' && cfg.match.test(id)) return type;
+// Generate consistent color from string hash
+function generateEntityColor(str) {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    hash = str.charCodeAt(i) + ((hash << 5) - hash);
   }
+  const hue = Math.abs(hash) % 360;
+  return `hsl(${hue}, 65%, 55%)`;
+}
+
+// Map common entity type prefixes to emojis
+function getEntityIcon(type) {
+  const iconMap = {
+    'agent': '🤖',
+    'task': '✓',
+    'session': '📋',
+    'artifact': '📄',
+    'host': '🖥',
+    'sensor': '🌡',
+    'device': '⚙',
+    'service': '🔧',
+    'job': '⚡',
+    'user': '👤',
+    'team': '👥',
+    'project': '📁',
+    'metric': '📊',
+    'alert': '🔔',
+    'log': '📝'
+  };
+  return iconMap[type.toLowerCase()] || '◆';
+}
+
+// Detect entity types dynamically from current entities
+function detectEntityTypes() {
+  const prefixCounts = {};
+
+  // Analyze all entity IDs
+  for (const id of Object.keys(entities)) {
+    let prefix = null;
+
+    // Check for delimiter-based prefix (type:id or namespace/id)
+    if (id.includes(':')) {
+      prefix = id.split(':')[0];
+    } else if (id.includes('/')) {
+      prefix = id.split('/')[0];
+    }
+
+    if (prefix) {
+      prefixCounts[prefix] = (prefixCounts[prefix] || 0) + 1;
+    }
+  }
+
+  // Build entity types from prefixes that meet threshold
+  const newTypes = {};
+  for (const [prefix, count] of Object.entries(prefixCounts)) {
+    if (count >= MIN_GROUP_SIZE) {
+      const label = prefix.charAt(0).toUpperCase() + prefix.slice(1) + 's';
+      newTypes[prefix] = {
+        icon: getEntityIcon(prefix),
+        color: generateEntityColor(prefix),
+        label: label
+      };
+    }
+  }
+
+  // Always include "Other" as catchall
+  newTypes.other = {
+    icon: '◇',
+    color: '#6a6a80',
+    label: 'Other'
+  };
+
+  entityTypes = newTypes;
+}
+
+function classifyEntity(id) {
+  // Check for delimiter-based prefix
+  let prefix = null;
+  if (id.includes(':')) {
+    prefix = id.split(':')[0];
+  } else if (id.includes('/')) {
+    prefix = id.split('/')[0];
+  }
+
+  // Return prefix if it's a recognized type
+  if (prefix && entityTypes[prefix]) {
+    return prefix;
+  }
+
   return 'other';
 }
 
@@ -844,11 +923,19 @@ function renderFilterBar() {
     const type = classifyEntity(id);
     counts[type] = (counts[type] || 0) + 1;
   }
-  
+
+  // Sort types: alphabetically, but "Other" always last
+  const sortedTypes = Object.entries(entityTypes).sort(([a], [b]) => {
+    if (a === 'other') return 1;
+    if (b === 'other') return -1;
+    return a.localeCompare(b);
+  });
+
   filterEl.innerHTML = `
     <input class="filter-search" type="text" placeholder="🔍 Filter entities..." value="${entitySearchFilter}" oninput="entitySearchFilter=this.value;renderEntities()">
-    ${Object.entries(ENTITY_TYPES).map(([type, cfg]) => {
+    ${sortedTypes.map(([type, cfg]) => {
       const count = counts[type] || 0;
+      if (count === 0) return ''; // Don't show empty types
       const isHidden = hiddenTypes.has(type);
       return `<span class="filter-chip ${isHidden ? 'hidden' : 'active'}" onclick="toggleTypeFilter('${type}')">${cfg.icon} ${cfg.label} (${count})</span>`;
     }).join('')}
@@ -881,7 +968,14 @@ function renderEntities() {
 
   container.innerHTML = '';
 
-  for (const [type, cfg] of Object.entries(ENTITY_TYPES)) {
+  // Sort types: alphabetically, but "Other" always last
+  const sortedTypes = Object.entries(entityTypes).sort(([a], [b]) => {
+    if (a === 'other') return 1;
+    if (b === 'other') return -1;
+    return a.localeCompare(b);
+  });
+
+  for (const [type, cfg] of sortedTypes) {
     if (!groups[type] || groups[type].length === 0) continue;
     
     const items = groups[type].sort((a, b) => a.id.localeCompare(b.id));
@@ -1028,6 +1122,7 @@ function flushUpdates() {
   // Re-render entities only if new ones appeared
   if (newEntitySeen) {
     newEntitySeen = false;
+    detectEntityTypes(); // Recompute dynamic types
     renderFilterBar();
     renderEntities();
   }
@@ -1042,6 +1137,7 @@ async function loadState() {
     for (const e of data) {
       entities[e.id] = { properties: e.properties, lastUpdated: e.lastUpdated };
     }
+    detectEntityTypes(); // Compute dynamic types from loaded entities
     renderFilterBar();
     renderEntities();
     updatePipeline();
