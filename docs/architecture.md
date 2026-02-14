@@ -1,7 +1,7 @@
 # Flux Architecture
 
-**Status:** Phase 1 Implementation
-**Last Updated:** 2026-02-11
+**Status:** Complete
+**Last Updated:** 2026-02-14
 
 ---
 
@@ -652,18 +652,27 @@ Clients connect to: localhost:3000
 
 ---
 
-## Limitations & Future Work
+## Current Limitations & Design Decisions
 
-**Phase 1 limitations:**
+**Known limitations (by design):**
 
-- No snapshot persistence (state rebuilds from events on restart)
-- In-memory state only (memory-bounded)
-- Single instance (no horizontal scaling)
-- No authentication/authorization
-- Basic error handling
+- **Single instance** - No horizontal sharding (YAGNI: current load doesn't require it)
+- **In-memory state** - Limited by available RAM (sufficient for current use cases)
+- **Simple queries** - Get all, get by ID, filter by namespace/prefix (intentionally limited to stay domain-agnostic)
+- **Replay from beginning only** - Arbitrary point replay not implemented (snapshot recovery is sufficient)
 
-**Planned improvements:**
+**Features intentionally NOT implemented:**
 
-- **Phase 2:** Snapshots, auth, replay from arbitrary point
-- **Phase 3:** Sharding, multi-tenancy, advanced queries
-- **Future:** Read replicas, CDC, external indexes
+These were considered but deemed unnecessary:
+
+- **Client SDK libraries** - API is simple enough, examples are adequate
+- **Advanced queries** - Would violate domain-agnostic design principle
+- **Sharding/horizontal scaling** - No current demand, add when needed
+- **Replay from arbitrary point** - Recovery via snapshots works well
+
+**When to add these features:**
+
+- Sharding: When single instance hits scale limits
+- Advanced queries: Never (use external indexing instead)
+- SDKs: When user demand emerges
+- Arbitrary replay: If time-travel debugging becomes critical

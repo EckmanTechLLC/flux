@@ -2,7 +2,11 @@
 
 **Version:** 1.0
 **Date:** 2026-02-10
-**Status:** Foundation
+**Status:** Historical (Project Complete 2026-02-14)
+
+> **Note:** This is the original design document. The project is now complete and deployed.
+> See `/CLAUDE.md` for current status and `/docs/architecture.md` for implemented architecture.
+> Some features described as "future work" were intentionally not implemented.
 
 ---
 

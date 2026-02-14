@@ -1,7 +1,7 @@
 # Flux Context for Claude
 
-**Last Updated:** 2026-02-13
-**Current Phase:** Phase 3 Complete - Multi-tenancy & Authentication
+**Last Updated:** 2026-02-14
+**Status:** PROJECT COMPLETE ✅
 
 ---
 
@@ -30,6 +30,10 @@
 ---
 
 ## Current Status
+
+**PROJECT COMPLETE ✅ 2026-02-14**
+
+Flux is feature-complete and deployed. All planned functionality implemented and working.
 
 ### Phase 1: State Engine MVP (COMPLETE ✅ 2026-02-11)
 - [x] Git repository initialized
@@ -75,9 +79,22 @@
 - [x] Task 6: Configuration support (centralized config, TOML loading)
 - [x] Task 7: UI updates (real-time metrics, removed fake calculations)
 - [x] Task 8: Documentation (ADR, API reference, README)
+- [x] Bugfix: WebSocket proxy field name + wildcard subscriptions (2026-02-14)
 
-**Deployments:**
+### Features Intentionally NOT Implemented
+
+These were in early design docs but deemed unnecessary (2026-02-14):
+
+- **Replay from arbitrary point** - Current recovery (snapshot + recent events) sufficient
+- **Client SDK libraries** - API simple enough, examples adequate, no user demand
+- **Sharding/horizontal scaling** - No scale issues, YAGNI principle
+- **Advanced queries** - Would violate domain-agnostic design principle
+
+**Deployment Status:**
 - Private test instance on etl-bot (Cloudflare tunnel + systemd, contact for access)
+- Public endpoint: https://flux.eckman-tech.com
+- UI running at http://192.168.50.106:8080
+- 7 VMs publishing system metrics
 - OpenClaw skill published to ClawHub registry (flux@1.0.0)
 - Arc agent coordinating through Flux on etl-bot
 
@@ -87,6 +104,8 @@
 - Flux WebSocket API: 3000
 - Flux HTTP API: 3000
 - Flux UI: 8082
+
+**All tests passing:** 142 tests ✅
 
 ---
 
