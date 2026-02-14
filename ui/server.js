@@ -152,7 +152,7 @@ wss.on('connection', (clientWs) => {
   const fluxWs = new WebSocket(FLUX_WS);
   
   fluxWs.on('open', () => {
-    fluxWs.send(JSON.stringify({ type: 'subscribe', entityId: '*' }));
+    fluxWs.send(JSON.stringify({ type: 'subscribe', entity_id: '*' }));
   });
   
   fluxWs.on('message', (data) => {

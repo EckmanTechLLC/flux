@@ -189,7 +189,7 @@ async fn publish_tombstone(
 ) -> Result<String, DeletionError> {
     let mut event = FluxEvent {
         event_id: None,
-        stream: "flux.deletions".to_string(),
+        stream: "flux.events.deletions".to_string(),
         source: "api".to_string(),
         timestamp: Utc::now().timestamp_millis(),
         key: Some(entity_id.to_string()),

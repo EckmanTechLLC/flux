@@ -993,10 +993,7 @@ function updateProperty(entityId, property, value, timestamp) {
 
 function flushUpdates() {
   renderScheduled = false;
-  
-  const now = Date.now();
-  eventWindow = eventWindow.filter(t => t > now - 5000);
-  
+
   // Update pipeline stats
   updatePipeline();
   
@@ -1116,21 +1113,9 @@ function applyServerPrefix() {
   loadState();
 }
 
-// Check for namespaces (informational)
-async function checkNamespaces() {
-  try {
-    const resp = await fetch('/api/namespaces');
-    if (resp.ok) {
-      const data = await resp.json();
-      if (Array.isArray(data) && data.length > 0) {
-        const el = document.getElementById('namespaceIndicator');
-        el.style.display = 'inline';
-        el.textContent = `📂 ${data.length} namespace${data.length > 1 ? 's' : ''}: ${data.map(n => n.name || n).join(', ')}`;
-      }
-    }
-  } catch(e) {}
-}
-checkNamespaces();
+// Note: Namespace listing (GET /api/namespaces) not implemented
+// Only individual lookup (GET /api/namespaces/:name) exists
+// Could be added in future for namespace discovery
 
 loadState();
 connectWS();

@@ -1,6 +1,6 @@
 use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, RwLock};
 use chrono::Utc;
 use serde::Serialize;
 
@@ -11,10 +11,10 @@ pub struct MetricsTracker {
     total_events: Arc<AtomicU64>,
 
     /// Event timestamps for rate calculation (sliding 5-second window)
-    event_timestamps: Arc<Mutex<VecDeque<i64>>>,
+    event_timestamps: Arc<RwLock<VecDeque<i64>>>,
 
     /// Active publishers (source -> last_seen_timestamp_ms)
-    active_publishers: Arc<Mutex<HashMap<String, i64>>>,
+    active_publishers: Arc<RwLock<HashMap<String, i64>>>,
 
     /// WebSocket connection count
     websocket_connections: Arc<AtomicU64>,
@@ -25,8 +25,8 @@ impl MetricsTracker {
     pub fn new() -> Self {
         Self {
             total_events: Arc::new(AtomicU64::new(0)),
-            event_timestamps: Arc::new(Mutex::new(VecDeque::new())),
-            active_publishers: Arc::new(Mutex::new(HashMap::new())),
+            event_timestamps: Arc::new(RwLock::new(VecDeque::new())),
+            active_publishers: Arc::new(RwLock::new(HashMap::new())),
             websocket_connections: Arc::new(AtomicU64::new(0)),
         }
     }
@@ -40,7 +40,7 @@ impl MetricsTracker {
 
         // Update sliding window for rate calculation
         {
-            let mut timestamps = self.event_timestamps.lock().unwrap();
+            let mut timestamps = self.event_timestamps.write().unwrap();
             timestamps.push_back(now);
 
             // Prune old timestamps (keep last 5 seconds)
@@ -55,14 +55,14 @@ impl MetricsTracker {
 
         // Update active publishers
         {
-            let mut publishers = self.active_publishers.lock().unwrap();
+            let mut publishers = self.active_publishers.write().unwrap();
             publishers.insert(source.to_string(), now);
         }
     }
 
     /// Get current event rate (events per second over last 5 seconds)
     pub fn get_event_rate(&self) -> f64 {
-        let timestamps = self.event_timestamps.lock().unwrap();
+        let timestamps = self.event_timestamps.read().unwrap();
         timestamps.len() as f64 / 5.0
     }
 
@@ -71,7 +71,7 @@ impl MetricsTracker {
         let now = Utc::now().timestamp_millis();
         let threshold = now - (window_seconds * 1000);
 
-        let publishers = self.active_publishers.lock().unwrap();
+        let publishers = self.active_publishers.read().unwrap();
         publishers
             .values()
             .filter(|&&last_seen| last_seen > threshold)

@@ -166,6 +166,11 @@ impl ConnectionManager {
             return true;
         }
 
+        // Check for wildcard subscription
+        if self.subscriptions.contains("*") {
+            return true;
+        }
+
         // Otherwise, only forward if subscribed to this entity
         self.subscriptions.contains(&update.entity_id)
     }
