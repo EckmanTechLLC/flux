@@ -757,7 +757,6 @@ let entityTypes = {};
 let hiddenTypes = new Set();
 
 const STALE_THRESHOLD = 120000; // 2 minutes
-const MIN_GROUP_SIZE = 2; // Minimum entities to form a group
 
 let entities = {};
 let eventCount = 0;
@@ -796,29 +795,49 @@ function getEntityIcon(type) {
 }
 
 // Detect entity types dynamically from current entities
+// Uses delimiter-aware thresholds:
+// - : (type:id) → threshold = 1 (intentional structure)
+// - / (namespace/id) → threshold = 1 (intentional structure)
+// - - (first segment only, e.g., host-server) → threshold = 2 (might be accidental)
 function detectEntityTypes() {
   const prefixCounts = {};
+  const delimiterUsed = {}; // Track which delimiter was used per prefix
 
   // Analyze all entity IDs
   for (const id of Object.keys(entities)) {
     let prefix = null;
+    let delimiter = null;
 
-    // Check for delimiter-based prefix (type:id or namespace/id)
+    // Check delimiters in priority order: :, /, -
     if (id.includes(':')) {
       prefix = id.split(':')[0];
+      delimiter = ':';
     } else if (id.includes('/')) {
       prefix = id.split('/')[0];
+      delimiter = '/';
+    } else if (id.includes('-')) {
+      // For -, only split on first occurrence (host-etl-demo-01 → "host")
+      prefix = id.split('-')[0];
+      delimiter = '-';
     }
 
     if (prefix) {
       prefixCounts[prefix] = (prefixCounts[prefix] || 0) + 1;
+      if (!delimiterUsed[prefix]) {
+        delimiterUsed[prefix] = delimiter;
+      }
     }
   }
 
-  // Build entity types from prefixes that meet threshold
+  // Build entity types from prefixes that meet delimiter-specific threshold
   const newTypes = {};
   for (const [prefix, count] of Object.entries(prefixCounts)) {
-    if (count >= MIN_GROUP_SIZE) {
+    const delimiter = delimiterUsed[prefix];
+    // : and / have threshold=1 (intentional structure)
+    // - has threshold=2 (might be accidental)
+    const threshold = (delimiter === ':' || delimiter === '/') ? 1 : 2;
+
+    if (count >= threshold) {
       const label = prefix.charAt(0).toUpperCase() + prefix.slice(1) + 's';
       newTypes[prefix] = {
         icon: getEntityIcon(prefix),
@@ -839,12 +858,15 @@ function detectEntityTypes() {
 }
 
 function classifyEntity(id) {
-  // Check for delimiter-based prefix
+  // Check for delimiter-based prefix (priority order: :, /, -)
   let prefix = null;
   if (id.includes(':')) {
     prefix = id.split(':')[0];
   } else if (id.includes('/')) {
     prefix = id.split('/')[0];
+  } else if (id.includes('-')) {
+    // For -, only split on first occurrence
+    prefix = id.split('-')[0];
   }
 
   // Return prefix if it's a recognized type
