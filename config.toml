@@ -12,3 +12,10 @@ stream_name = "FLUX_EVENTS"
 
 [recovery]
 auto_recover = true  # Load snapshot on startup
+
+[metrics]
+broadcast_interval_seconds = 2
+active_publisher_window_seconds = 10
+
+[api]
+max_batch_delete = 10000

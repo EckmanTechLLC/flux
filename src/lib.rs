@@ -1,3 +1,6 @@
+// Configuration
+pub mod config;
+
 // Event model and validation
 pub mod event;
 

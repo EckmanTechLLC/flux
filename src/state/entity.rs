@@ -25,3 +25,10 @@ pub struct StateUpdate {
     pub new_value: Value,
     pub timestamp: DateTime<Utc>,
 }
+
+/// Entity deleted message broadcast to subscribers
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct EntityDeleted {
+    pub entity_id: String,
+    pub timestamp: DateTime<Utc>,
+}

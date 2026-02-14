@@ -307,6 +307,108 @@ curl http://localhost:3000/api/state/entities/temp-sensor-01
 
 ---
 
+### Entity Management
+
+#### DELETE /api/state/entities/:id
+
+Delete a single entity by ID.
+
+**Request:**
+
+```http
+DELETE /api/state/entities/temp-sensor-01 HTTP/1.1
+Authorization: Bearer <token>  # Only if auth enabled
+```
+
+**Response (200 OK):**
+
+```json
+{
+  "entity_id": "temp-sensor-01",
+  "eventId": "019c5c88-5386-7ae0-ab4d-80a8c1ce631a"
+}
+```
+
+**Authorization:**
+- Auth disabled: Anyone can delete
+- Auth enabled: Must provide bearer token that owns the entity's namespace
+
+**curl example:**
+
+```bash
+# Without auth
+curl -X DELETE http://localhost:3000/api/state/entities/temp-sensor-01
+
+# With auth
+curl -X DELETE http://localhost:3000/api/state/entities/matt/sensor-01 \
+  -H "Authorization: Bearer <your-token>"
+```
+
+---
+
+#### POST /api/state/entities/delete
+
+Batch delete entities by filter.
+
+**Request:**
+
+```http
+POST /api/state/entities/delete HTTP/1.1
+Content-Type: application/json
+Authorization: Bearer <token>  # Only if auth enabled
+
+{
+  "prefix": "loadtest-"
+}
+```
+
+**Filter options (choose one):**
+
+```json
+// Delete by namespace
+{"namespace": "matt"}
+
+// Delete by prefix
+{"prefix": "loadtest-"}
+
+// Delete specific entities
+{"entity_ids": ["id1", "id2", "id3"]}
+```
+
+**Response (200 OK):**
+
+```json
+{
+  "deleted": 3,
+  "failed": 0,
+  "errors": []
+}
+```
+
+**Limits:**
+- Maximum batch size: 10,000 entities (configurable via `max_batch_delete`)
+
+**Authorization:**
+- Auth disabled: Can delete any entities matching filter
+- Auth enabled: Can only delete entities in owned namespace
+
+**curl example:**
+
+```bash
+# Delete by prefix
+curl -X POST http://localhost:3000/api/state/entities/delete \
+  -H "Content-Type: application/json" \
+  -d '{"prefix": "loadtest-"}'
+
+# Delete by namespace (with auth)
+curl -X POST http://localhost:3000/api/state/entities/delete \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <your-token>" \
+  -d '{"namespace": "matt"}'
+```
+
+---
+
 ## WebSocket API
 
 ### Connection
@@ -353,7 +455,7 @@ async def connect():
         # Subscribe
         await websocket.send(json.dumps({
             "type": "subscribe",
-            "entityId": "temp-sensor-01"
+            "entity_id": "temp-sensor-01"
         }))
 
         # Receive updates
@@ -377,18 +479,18 @@ Subscribe to updates for a specific entity.
 ```json
 {
   "type": "subscribe",
-  "entityId": "temp-sensor-01"
+  "entity_id": "temp-sensor-01"
 }
 ```
 
 **Fields:**
 
 - `type` (required) - Must be "subscribe"
-- `entityId` (required) - Entity ID to subscribe to
+- `entity_id` (required) - Entity ID to subscribe to (use "*" for all entities)
 
 **Effect:**
 
-- Client will receive `update` messages when entity changes
+- Client will receive `state_update` messages when entity properties change
 - Multiple subscriptions allowed (send multiple subscribe messages)
 
 **JavaScript example:**
@@ -396,7 +498,13 @@ Subscribe to updates for a specific entity.
 ```javascript
 ws.send(JSON.stringify({
   type: 'subscribe',
-  entityId: 'temp-sensor-01'
+  entity_id: 'temp-sensor-01'
+}));
+
+// Subscribe to all entities
+ws.send(JSON.stringify({
+  type: 'subscribe',
+  entity_id: '*'
 }));
 ```
 
@@ -411,14 +519,14 @@ Stop receiving updates for a specific entity.
 ```json
 {
   "type": "unsubscribe",
-  "entityId": "temp-sensor-01"
+  "entity_id": "temp-sensor-01"
 }
 ```
 
 **Fields:**
 
 - `type` (required) - Must be "unsubscribe"
-- `entityId` (required) - Entity ID to unsubscribe from
+- `entity_id` (required) - Entity ID to unsubscribe from
 
 **Effect:**
 
@@ -430,43 +538,42 @@ Stop receiving updates for a specific entity.
 ```javascript
 ws.send(JSON.stringify({
   type: 'unsubscribe',
-  entityId: 'temp-sensor-01'
+  entity_id: 'temp-sensor-01'
 }));
 ```
 
 ---
 
-#### Server → Client: Update
+#### Server → Client: State Update
 
-State update notification sent when subscribed entity changes.
+State update notification sent when subscribed entity property changes.
 
 **Message:**
 
 ```json
 {
-  "type": "update",
-  "entity": {
-    "id": "temp-sensor-01",
-    "properties": {
-      "temperature": 22.5,
-      "unit": "celsius"
-    },
-    "last_updated": "2026-02-11T10:30:45.123Z"
-  }
+  "type": "state_update",
+  "entity_id": "temp-sensor-01",
+  "property": "temperature",
+  "value": 22.5,
+  "timestamp": "2026-02-14T10:30:45.123Z"
 }
 ```
 
 **Fields:**
 
-- `type` - Always "update"
-- `entity` - Full entity state (all properties)
+- `type` - Always "state_update"
+- `entity_id` - Entity identifier
+- `property` - Property name that changed
+- `value` - New property value
+- `timestamp` - Update timestamp
 
 **When sent:**
 
-- Immediately after successful subscription (initial state snapshot)
-- Whenever any property of the subscribed entity changes
+- Whenever any property of a subscribed entity changes
+- One message per property update (not batched)
 
-**Note:** Updates contain full entity state, not deltas.
+**Note:** Updates are per-property, not full entity state.
 
 **JavaScript handler:**
 
@@ -474,9 +581,100 @@ State update notification sent when subscribed entity changes.
 ws.onmessage = (event) => {
   const message = JSON.parse(event.data);
 
-  if (message.type === 'update') {
-    const entity = message.entity;
-    console.log(`Entity ${entity.id} updated:`, entity.properties);
+  if (message.type === 'state_update') {
+    console.log(`${message.entity_id}.${message.property} = ${message.value}`);
+  }
+};
+```
+
+---
+
+#### Server → Client: Metrics Update
+
+Real-time metrics broadcast (every 2 seconds by default).
+
+**Message:**
+
+```json
+{
+  "type": "metrics_update",
+  "timestamp": "2026-02-14T14:30:45.123Z",
+  "entities": {
+    "total": 1543
+  },
+  "events": {
+    "total": 458392,
+    "rate_per_second": 45.2
+  },
+  "websocket": {
+    "connections": 3
+  },
+  "publishers": {
+    "active": 12
+  }
+}
+```
+
+**Fields:**
+
+- `type` - Always "metrics_update"
+- `timestamp` - Server timestamp
+- `entities.total` - Current entity count
+- `events.total` - Total events processed
+- `events.rate_per_second` - Current event rate (5-second window)
+- `websocket.connections` - Active WebSocket connections
+- `publishers.active` - Active publishers (within configured window)
+
+**JavaScript handler:**
+
+```javascript
+ws.onmessage = (event) => {
+  const message = JSON.parse(event.data);
+
+  if (message.type === 'metrics_update') {
+    console.log(`Entities: ${message.entities.total}`);
+    console.log(`Event rate: ${message.events.rate_per_second} eps`);
+    console.log(`Active publishers: ${message.publishers.active}`);
+  }
+};
+```
+
+---
+
+#### Server → Client: Entity Deleted
+
+Notification when an entity is deleted.
+
+**Message:**
+
+```json
+{
+  "type": "entity_deleted",
+  "entity_id": "temp-sensor-01",
+  "timestamp": "2026-02-14T14:30:45.123Z"
+}
+```
+
+**Fields:**
+
+- `type` - Always "entity_deleted"
+- `entity_id` - ID of deleted entity
+- `timestamp` - Deletion timestamp
+
+**When sent:**
+
+- When entity is deleted via DELETE API
+- Sent to all connected WebSocket clients
+
+**JavaScript handler:**
+
+```javascript
+ws.onmessage = (event) => {
+  const message = JSON.parse(event.data);
+
+  if (message.type === 'entity_deleted') {
+    console.log(`Entity ${message.entity_id} was deleted`);
+    // Remove from local cache/UI
   }
 };
 ```
@@ -495,12 +693,12 @@ ws.onopen = () => {
   // Subscribe to multiple entities
   ws.send(JSON.stringify({
     type: 'subscribe',
-    entityId: 'temp-sensor-01'
+    entity_id: 'temp-sensor-01'
   }));
 
   ws.send(JSON.stringify({
     type: 'subscribe',
-    entityId: 'temp-sensor-02'
+    entity_id: 'temp-sensor-02'
   }));
 };
 
@@ -527,7 +725,7 @@ ws.onopen = () => {
   entities.forEach(entity => {
     ws.send(JSON.stringify({
       type: 'subscribe',
-      entityId: entity.id
+      entity_id: entity.id
     }));
   });
 };
@@ -547,7 +745,7 @@ ws.onmessage = (event) => {
 ws.onopen = () => {
   ws.send(JSON.stringify({
     type: 'subscribe',
-    entityId: 'my-entity'
+    entity_id: 'my-entity'
   }));
 };
 

@@ -1,7 +1,10 @@
-use crate::state::StateUpdate;
-use crate::subscription::protocol::{ClientMessage, StateUpdateMessage};
+use crate::state::{EntityDeleted, MetricsUpdate, StateEngine, StateUpdate};
+use crate::subscription::protocol::{
+    ClientMessage, EntityDeletedMessage, MetricsUpdateMessage, StateUpdateMessage,
+};
 use axum::extract::ws::{Message, WebSocket};
 use std::collections::HashSet;
+use std::sync::Arc;
 use tokio::sync::broadcast;
 use tracing::{error, info, warn};
 
@@ -23,7 +26,12 @@ impl ConnectionManager {
         mut self,
         mut socket: WebSocket,
         mut state_rx: broadcast::Receiver<StateUpdate>,
+        mut metrics_rx: broadcast::Receiver<MetricsUpdate>,
+        mut deletion_rx: broadcast::Receiver<EntityDeleted>,
+        state_engine: Arc<StateEngine>,
     ) {
+        // Increment WebSocket connection count
+        state_engine.metrics.increment_ws_connection();
         info!("WebSocket connection established");
 
         loop {
@@ -68,11 +76,51 @@ impl ConnectionManager {
                             }
                         }
                         Err(broadcast::error::RecvError::Lagged(skipped)) => {
-                            warn!(skipped = skipped, "WebSocket lagged, skipped updates");
+                            warn!(skipped = skipped, "WebSocket lagged, skipped state updates");
                             // Continue processing
                         }
                         Err(broadcast::error::RecvError::Closed) => {
                             error!("State broadcast channel closed");
+                            break;
+                        }
+                    }
+                }
+
+                // Handle metrics updates from broadcast channel
+                result = metrics_rx.recv() => {
+                    match result {
+                        Ok(metrics) => {
+                            if let Err(e) = self.send_metrics_update(&mut socket, metrics).await {
+                                error!(error = %e, "Failed to send metrics update");
+                                break;
+                            }
+                        }
+                        Err(broadcast::error::RecvError::Lagged(skipped)) => {
+                            warn!(skipped = skipped, "WebSocket lagged, skipped metrics updates");
+                            // Continue processing
+                        }
+                        Err(broadcast::error::RecvError::Closed) => {
+                            error!("Metrics broadcast channel closed");
+                            break;
+                        }
+                    }
+                }
+
+                // Handle entity deletion events from broadcast channel
+                result = deletion_rx.recv() => {
+                    match result {
+                        Ok(deleted) => {
+                            if let Err(e) = self.send_entity_deleted(&mut socket, deleted).await {
+                                error!(error = %e, "Failed to send entity deleted");
+                                break;
+                            }
+                        }
+                        Err(broadcast::error::RecvError::Lagged(skipped)) => {
+                            warn!(skipped = skipped, "WebSocket lagged, skipped deletion events");
+                            // Continue processing
+                        }
+                        Err(broadcast::error::RecvError::Closed) => {
+                            error!("Deletion broadcast channel closed");
                             break;
                         }
                     }
@@ -84,6 +132,8 @@ impl ConnectionManager {
             }
         }
 
+        // Decrement WebSocket connection count
+        state_engine.metrics.decrement_ws_connection();
         info!("WebSocket connection closed");
     }
 
@@ -127,6 +177,30 @@ impl ConnectionManager {
         update: StateUpdate,
     ) -> anyhow::Result<()> {
         let msg = StateUpdateMessage::from(update);
+        let json = serde_json::to_string(&msg)?;
+        socket.send(Message::Text(json)).await?;
+        Ok(())
+    }
+
+    /// Send metrics update to client
+    async fn send_metrics_update(
+        &self,
+        socket: &mut WebSocket,
+        metrics: MetricsUpdate,
+    ) -> anyhow::Result<()> {
+        let msg = MetricsUpdateMessage::from(metrics);
+        let json = serde_json::to_string(&msg)?;
+        socket.send(Message::Text(json)).await?;
+        Ok(())
+    }
+
+    /// Send entity deleted to client
+    async fn send_entity_deleted(
+        &self,
+        socket: &mut WebSocket,
+        deleted: EntityDeleted,
+    ) -> anyhow::Result<()> {
+        let msg = EntityDeletedMessage::from(deleted);
         let json = serde_json::to_string(&msg)?;
         socket.send(Message::Text(json)).await?;
         Ok(())

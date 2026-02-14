@@ -1,15 +1,31 @@
 use anyhow::{Context, Result};
 use async_nats::jetstream::{self, stream};
+use serde::Deserialize;
 use tracing::info;
 
 /// NATS configuration
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Deserialize)]
 pub struct NatsConfig {
     pub url: String,
     pub stream_name: String,
+    #[serde(default = "default_stream_subjects")]
     pub stream_subjects: Vec<String>,
+    #[serde(default = "default_max_age_days")]
     pub max_age_days: i64,
+    #[serde(default = "default_max_bytes")]
     pub max_bytes: i64,
+}
+
+fn default_stream_subjects() -> Vec<String> {
+    vec!["flux.events.>".to_string()]
+}
+
+fn default_max_age_days() -> i64 {
+    7
+}
+
+fn default_max_bytes() -> i64 {
+    10 * 1024 * 1024 * 1024 // 10GB
 }
 
 impl Default for NatsConfig {

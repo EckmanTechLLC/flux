@@ -1,12 +1,13 @@
 use anyhow::Result;
 use axum::{routing::get, Router};
 use flux::api::{
-    create_namespace_router, create_query_router, create_router, ws_handler, AppState,
-    QueryAppState, WsAppState,
+    create_deletion_router, create_namespace_router, create_query_router, create_router,
+    ws_handler, AppState, DeletionAppState, QueryAppState, WsAppState,
 };
+use flux::config;
 use flux::namespace::NamespaceRegistry;
-use flux::nats::{EventPublisher, NatsClient, NatsConfig};
-use flux::snapshot::{config::SnapshotConfig, manager::SnapshotManager, recovery};
+use flux::nats::{EventPublisher, NatsClient};
+use flux::snapshot::{manager::SnapshotManager, recovery};
 use flux::state::StateEngine;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -24,8 +25,15 @@ async fn main() -> Result<()> {
 
     info!("Flux starting...");
 
+    // Load configuration
+    let config_path = std::env::var("FLUX_CONFIG").unwrap_or_else(|_| "config.toml".to_string());
+    let flux_config = config::load_config(&config_path).unwrap_or_else(|e| {
+        tracing::warn!(error = %e, "Failed to load config, using defaults");
+        config::FluxConfig::default()
+    });
+
     // Initialize NATS client
-    let nats_config = NatsConfig::default();
+    let nats_config = flux_config.nats.clone();
     let nats_client = NatsClient::connect(nats_config).await?;
     info!("NATS client connected");
 
@@ -37,7 +45,7 @@ async fn main() -> Result<()> {
     info!("State engine initialized");
 
     // Recovery: Try to load latest snapshot
-    let snapshot_dir = PathBuf::from("/var/lib/flux/snapshots");
+    let snapshot_dir = PathBuf::from(&flux_config.snapshot.directory);
     let start_sequence = match recovery::load_latest_snapshot(&snapshot_dir)? {
         Some((snapshot, seq)) => {
             info!(
@@ -66,9 +74,21 @@ async fn main() -> Result<()> {
     });
     info!("State engine subscriber started");
 
+    // Start metrics broadcaster (background task)
+    let engine_clone = Arc::clone(&state_engine);
+    let metrics_config = flux_config.metrics.clone();
+    tokio::spawn(async move {
+        flux::state::run_metrics_broadcaster(
+            engine_clone,
+            metrics_config.broadcast_interval_seconds,
+            metrics_config.active_publisher_window_seconds,
+        )
+        .await;
+    });
+    info!("Metrics broadcaster started");
+
     // Start snapshot manager (background task)
-    let snapshot_config = SnapshotConfig::default();
-    let snapshot_manager = SnapshotManager::new(Arc::clone(&state_engine), snapshot_config);
+    let snapshot_manager = SnapshotManager::new(Arc::clone(&state_engine), flux_config.snapshot.clone());
     tokio::spawn(async move {
         if let Err(e) = snapshot_manager.run_snapshot_loop().await {
             tracing::error!(error = %e, "Snapshot manager failed");
@@ -94,7 +114,7 @@ async fn main() -> Result<()> {
 
     // Create ingestion API router
     let ingestion_state = AppState {
-        event_publisher,
+        event_publisher: event_publisher.clone(),
         namespace_registry: Arc::clone(&namespace_registry),
         auth_enabled,
     };
@@ -102,6 +122,16 @@ async fn main() -> Result<()> {
 
     // Create namespace API router (reuses ingestion_state)
     let namespace_router = create_namespace_router(ingestion_state);
+
+    // Create deletion API router
+    let deletion_state = DeletionAppState {
+        event_publisher: event_publisher.clone(),
+        namespace_registry: Arc::clone(&namespace_registry),
+        state_engine: Arc::clone(&state_engine),
+        auth_enabled,
+        max_batch_delete: flux_config.api.max_batch_delete,
+    };
+    let deletion_router = create_deletion_router(deletion_state);
 
     // Create WebSocket API router
     let ws_state = Arc::new(WsAppState {
@@ -118,6 +148,7 @@ async fn main() -> Result<()> {
     // Combine routers
     let app = ingestion_router
         .merge(namespace_router)
+        .merge(deletion_router)
         .merge(ws_router)
         .merge(query_router);
 

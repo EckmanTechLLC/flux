@@ -30,9 +30,23 @@ async fn handle_socket(socket: WebSocket, state: Arc<WsAppState>) {
     // Subscribe to state updates
     let state_rx = state.state_engine.subscribe();
 
+    // Subscribe to metrics updates
+    let metrics_rx = state.state_engine.subscribe_metrics();
+
+    // Subscribe to deletion events
+    let deletion_rx = state.state_engine.subscribe_deletions();
+
     // Create connection manager
     let manager = ConnectionManager::new();
 
     // Handle connection lifecycle
-    manager.handle(socket, state_rx).await;
+    manager
+        .handle(
+            socket,
+            state_rx,
+            metrics_rx,
+            deletion_rx,
+            Arc::clone(&state.state_engine),
+        )
+        .await;
 }

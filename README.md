@@ -240,6 +240,35 @@ curl http://localhost:3000/api/state/entities?prefix=matt/sensor
 
 **Note:** Tokens control writes only. Reading is always open for observation and coordination.
 
+## Web UI
+
+Flux includes a real-time web UI for monitoring and management.
+
+**Start UI:**
+```bash
+cd ui
+node server.js
+```
+
+**Access:**
+- Local: `http://localhost:8082`
+- Remote: `http://<your-server-ip>:8082`
+
+**Features:**
+- Real-time metrics (EPS, entity count, active publishers)
+- Live entity viewer with grouping and filtering
+- Load testing controls
+- Dark theme optimized for monitoring
+
+**Configuration:**
+```bash
+# Custom port
+UI_PORT=9000 node server.js
+
+# Connect to different Flux instance
+FLUX_API=http://other-host:3000 FLUX_WS=ws://other-host:3000/api/ws node server.js
+```
+
 ## Integrations
 
 ### OpenClaw Skill
@@ -272,8 +301,12 @@ See `/examples/openclaw-skill/` for full documentation.
 - `GET /api/state/entities` - List all entities
 - `GET /api/state/entities/:id` - Get specific entity
 
+**Entity Management:**
+- `DELETE /api/state/entities/:id` - Delete single entity
+- `POST /api/state/entities/delete` - Batch delete (by namespace/prefix/IDs)
+
 **Real-time Updates:**
-- `GET /api/ws` - WebSocket subscription
+- `GET /api/ws` - WebSocket subscription (state updates, metrics, deletions)
 
 For detailed API documentation with examples, see [API Reference](docs/api.md).
 

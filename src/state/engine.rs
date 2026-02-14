@@ -1,5 +1,6 @@
 use crate::event::FluxEvent;
-use crate::state::entity::{Entity, StateUpdate};
+use crate::state::entity::{Entity, EntityDeleted, StateUpdate};
+use crate::state::metrics::MetricsTracker;
 use anyhow::{Context, Result};
 use async_nats::jetstream;
 use chrono::Utc;
@@ -15,24 +16,38 @@ use tracing::{error, info, warn};
 /// State engine maintains in-memory world state
 pub struct StateEngine {
     /// Lock-free concurrent map for fast reads
-    entities: Arc<DashMap<String, Entity>>,
+    pub(crate) entities: Arc<DashMap<String, Entity>>,
 
     /// Broadcast channel for state change events
     state_tx: broadcast::Sender<StateUpdate>,
 
+    /// Broadcast channel for entity deletion events
+    deletion_tx: broadcast::Sender<EntityDeleted>,
+
     /// Last processed NATS sequence number
     last_processed_sequence: AtomicU64,
+
+    /// Metrics tracker for monitoring
+    pub metrics: MetricsTracker,
+
+    /// Broadcast channel for metrics updates
+    pub(crate) metrics_tx: broadcast::Sender<crate::state::metrics_broadcaster::MetricsUpdate>,
 }
 
 impl StateEngine {
     /// Create new state engine with broadcast channel
     pub fn new() -> Self {
         let (state_tx, _) = broadcast::channel(1000);
+        let (deletion_tx, _) = broadcast::channel(100);
+        let (metrics_tx, _) = broadcast::channel(10);
 
         Self {
             entities: Arc::new(DashMap::new()),
             state_tx,
+            deletion_tx,
             last_processed_sequence: AtomicU64::new(0),
+            metrics: MetricsTracker::new(),
+            metrics_tx,
         }
     }
 
@@ -92,6 +107,35 @@ impl StateEngine {
         self.state_tx.subscribe()
     }
 
+    /// Subscribe to metrics updates
+    pub fn subscribe_metrics(&self) -> broadcast::Receiver<crate::state::metrics_broadcaster::MetricsUpdate> {
+        self.metrics_tx.subscribe()
+    }
+
+    /// Subscribe to entity deletion events
+    pub fn subscribe_deletions(&self) -> broadcast::Receiver<EntityDeleted> {
+        self.deletion_tx.subscribe()
+    }
+
+    /// Delete entity from state
+    pub fn delete_entity(&self, entity_id: &str) -> Option<Entity> {
+        // Remove entity from state
+        let removed = self.entities.remove(entity_id).map(|(_, entity)| entity);
+
+        if removed.is_some() {
+            // Broadcast deletion event
+            let deletion = EntityDeleted {
+                entity_id: entity_id.to_string(),
+                timestamp: Utc::now(),
+            };
+            let _ = self.deletion_tx.send(deletion);
+
+            info!(entity_id = %entity_id, "Entity deleted");
+        }
+
+        removed
+    }
+
     /// Get last processed NATS sequence number
     pub fn get_last_processed_sequence(&self) -> u64 {
         self.last_processed_sequence.load(Ordering::SeqCst)
@@ -132,6 +176,9 @@ impl StateEngine {
     ///   }
     /// }
     pub fn process_event(&self, event: &FluxEvent) {
+        // Record metrics
+        self.metrics.record_event(&event.source);
+
         // Extract entity_id from payload
         let entity_id = match event.payload.get("entity_id").and_then(|v| v.as_str()) {
             Some(id) => id,
@@ -156,6 +203,12 @@ impl StateEngine {
                 return;
             }
         };
+
+        // Check for tombstone marker (deletion event)
+        if let Some(Value::Bool(true)) = properties.get("__deleted__") {
+            self.delete_entity(entity_id);
+            return;
+        }
 
         // Update each property
         for (property_name, property_value) in properties {

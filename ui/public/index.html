@@ -1,0 +1,1228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Flux — World State Engine</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  
+  :root {
+    --bg: #0a0a0f;
+    --bg2: #12121a;
+    --bg3: #1a1a25;
+    --border: #2a2a3a;
+    --text: #e0e0e8;
+    --text-dim: #6a6a80;
+    --accent: #6c5ce7;
+    --accent2: #a855f7;
+    --green: #00d2a0;
+    --yellow: #f5c542;
+    --red: #ff6b6b;
+    --blue: #4fc3f7;
+    --orange: #ff9f43;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    overflow-x: hidden;
+  }
+
+  /* Header */
+  .header {
+    padding: 20px 32px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    background: linear-gradient(180deg, var(--bg2) 0%, var(--bg) 100%);
+  }
+
+  .header h1 {
+    font-size: 28px;
+    font-weight: 700;
+    background: linear-gradient(135deg, var(--accent2), var(--blue));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    letter-spacing: -0.5px;
+  }
+
+  .header .subtitle {
+    color: var(--text-dim);
+    font-size: 14px;
+  }
+
+  .header .status {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    color: var(--text-dim);
+  }
+
+  .status-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--green);
+    animation: pulse 2s ease-in-out infinite;
+  }
+
+  .status-dot.disconnected { background: var(--red); animation: none; }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+  }
+
+  /* Pipeline - the interactive flow */
+  .pipeline {
+    padding: 20px 32px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg2);
+    display: flex;
+    align-items: stretch;
+    justify-content: center;
+    gap: 0;
+    overflow-x: auto;
+  }
+
+  .pipe-node {
+    padding: 14px 20px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--bg3);
+    min-width: 150px;
+    text-align: center;
+    transition: all 0.3s ease;
+    position: relative;
+  }
+
+  .pipe-node:hover {
+    border-color: var(--accent);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 16px rgba(108, 92, 231, 0.15);
+  }
+
+  .pipe-node.active {
+    border-color: var(--green);
+    box-shadow: 0 0 12px rgba(0, 210, 160, 0.1);
+  }
+
+  .pipe-label {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+    margin-bottom: 8px;
+  }
+
+  .pipe-stats {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .pipe-stat {
+    font-size: 20px;
+    font-weight: 700;
+    font-family: 'JetBrains Mono', monospace;
+    line-height: 1;
+  }
+
+  .pipe-stat.green { color: var(--green); }
+  .pipe-stat.blue { color: var(--blue); }
+  .pipe-stat.purple { color: var(--accent2); }
+  .pipe-stat.orange { color: var(--orange); }
+
+  .pipe-desc {
+    font-size: 10px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-top: 2px;
+  }
+
+  .pipe-arrow {
+    display: flex;
+    align-items: center;
+    padding: 0 8px;
+    position: relative;
+  }
+
+  .pipe-arrow svg {
+    width: 32px;
+    height: 20px;
+    overflow: visible;
+  }
+
+  .arrow-line {
+    stroke: var(--border);
+    stroke-width: 2;
+    fill: none;
+  }
+
+  .arrow-head {
+    fill: var(--border);
+  }
+
+  .arrow-particle {
+    fill: var(--green);
+    opacity: 0;
+  }
+
+  .pipe-arrow.flowing .arrow-line { stroke: var(--green); stroke-width: 2; }
+  .pipe-arrow.flowing .arrow-head { fill: var(--green); }
+  .pipe-arrow.flowing .arrow-particle {
+    animation: flowParticle 0.8s ease-in-out infinite;
+  }
+
+  @keyframes flowParticle {
+    0% { opacity: 0; cx: 2; }
+    20% { opacity: 1; }
+    80% { opacity: 1; }
+    100% { opacity: 0; cx: 28; }
+  }
+
+  /* Main layout */
+  .main {
+    display: grid;
+    grid-template-columns: 1fr 360px;
+    height: calc(100vh - 170px);
+  }
+
+  /* Aether - entity graph */
+  .aether {
+    padding: 20px 24px;
+    overflow: auto;
+  }
+
+  .aether-title {
+    font-size: 15px;
+    font-weight: 600;
+    margin-bottom: 16px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--text-dim);
+  }
+
+  .aether-title span { color: var(--accent2); }
+
+  /* Entity groups */
+  .entity-filter {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 12px;
+    align-items: center;
+  }
+  .filter-chip {
+    padding: 4px 12px;
+    border-radius: 12px;
+    font-size: 12px;
+    cursor: pointer;
+    border: 1px solid var(--border);
+    background: var(--card);
+    color: var(--dim);
+    transition: all 0.2s;
+    user-select: none;
+  }
+  .filter-chip.active {
+    border-color: var(--accent);
+    color: var(--text);
+  }
+  .filter-chip.hidden {
+    opacity: 0.4;
+    text-decoration: line-through;
+  }
+  .filter-chip:hover { border-color: var(--accent); }
+  .filter-search {
+    padding: 4px 10px;
+    border-radius: 12px;
+    border: 1px solid var(--border);
+    background: var(--card);
+    color: var(--text);
+    font-size: 12px;
+    outline: none;
+    width: 140px;
+  }
+  .filter-search:focus { border-color: var(--accent); }
+
+  .entity-groups {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 20px;
+    align-content: flex-start;
+  }
+
+  .entity-group {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 14px;
+    min-width: 220px;
+    flex: 1;
+    max-width: 420px;
+  }
+
+  .group-label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: var(--text-dim);
+    margin-bottom: 10px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    user-select: none;
+  }
+
+  .group-label:hover { color: var(--text); }
+
+  .group-label .group-toggle {
+    font-size: 10px;
+    transition: transform 0.2s;
+  }
+
+  .entity-group.collapsed .group-toggle { transform: rotate(-90deg); }
+  .entity-group.collapsed .entity-node { display: none; }
+  .entity-group.collapsed .group-summary { display: block; }
+
+  .group-summary {
+    display: none;
+    font-size: 11px;
+    color: var(--text-dim);
+    padding: 6px 0;
+  }
+
+  .group-icon {
+    width: 16px; height: 16px;
+    border-radius: 4px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 10px;
+  }
+
+  .entity-node {
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 12px;
+    margin-bottom: 6px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    position: relative;
+  }
+
+  .entity-node:last-child { margin-bottom: 0; }
+
+  .entity-node:hover {
+    border-color: var(--accent);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+  }
+
+  .entity-node.flash {
+    border-color: var(--green);
+    box-shadow: 0 0 16px rgba(0, 210, 160, 0.15);
+  }
+
+  .entity-node.stale {
+    opacity: 0.5;
+  }
+
+  .entity-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 4px;
+  }
+
+  .entity-name {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+    font-family: 'JetBrains Mono', monospace;
+  }
+
+  .entity-status {
+    font-size: 10px;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-weight: 500;
+  }
+
+  .entity-status.healthy, .entity-status.active, .entity-status.online {
+    background: rgba(0, 210, 160, 0.12);
+    color: var(--green);
+  }
+
+  .entity-status.warning {
+    background: rgba(245, 197, 66, 0.12);
+    color: var(--yellow);
+  }
+
+  .entity-status.critical, .entity-status.error {
+    background: rgba(255, 107, 107, 0.12);
+    color: var(--red);
+  }
+
+  .entity-time {
+    font-size: 10px;
+    color: var(--text-dim);
+  }
+
+  .entity-props {
+    display: none;
+    flex-direction: column;
+    gap: 3px;
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid var(--border);
+  }
+
+  .entity-node.expanded .entity-props {
+    display: flex;
+  }
+
+  .prop-row {
+    display: flex;
+    justify-content: space-between;
+    font-size: 11px;
+    align-items: center;
+  }
+
+  .prop-key { color: var(--text-dim); }
+  .prop-val { 
+    color: var(--text); 
+    font-family: 'JetBrains Mono', monospace;
+    text-align: right;
+    font-size: 11px;
+    word-break: break-word;
+    white-space: pre-wrap;
+    max-width: 250px;
+  }
+
+  .prop-val.changed {
+    color: var(--green);
+    transition: color 1.5s ease;
+  }
+
+  .prop-bar {
+    height: 3px;
+    border-radius: 2px;
+    background: var(--border);
+    margin-top: 2px;
+    overflow: hidden;
+  }
+
+  .prop-bar-fill {
+    height: 100%;
+    border-radius: 2px;
+    transition: width 0.5s ease;
+  }
+
+  /* Event stream panel */
+  .stream-panel {
+    border-left: 1px solid var(--border);
+    background: var(--bg2);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .stream-header {
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--border);
+    font-size: 14px;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .stream-header .count {
+    margin-left: auto;
+    font-size: 11px;
+    color: var(--text-dim);
+    font-weight: 400;
+  }
+
+  .stream-events {
+    flex: 1;
+    overflow-y: auto;
+    padding: 6px 8px;
+  }
+
+  .stream-event {
+    padding: 6px 10px;
+    border-radius: 5px;
+    margin-bottom: 3px;
+    font-size: 11px;
+    font-family: 'JetBrains Mono', monospace;
+    animation: slideIn 0.3s ease;
+    background: var(--bg);
+    border: 1px solid transparent;
+    line-height: 1.4;
+  }
+
+  .stream-event:hover {
+    border-color: var(--border);
+  }
+
+  @keyframes slideIn {
+    from { opacity: 0; transform: translateY(-6px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .event-entity { color: var(--blue); font-weight: 600; }
+  .event-prop { color: var(--accent2); }
+  .event-value { color: var(--green); }
+  .event-time { color: var(--text-dim); font-size: 10px; float: right; }
+
+  /* Load Test Panel */
+  .loadtest-toggle {
+    position: fixed;
+    bottom: 16px;
+    right: 16px;
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 14px;
+    color: var(--text-dim);
+    font-size: 12px;
+    cursor: pointer;
+    z-index: 100;
+    transition: all 0.2s;
+  }
+
+  .loadtest-toggle:hover {
+    border-color: var(--accent);
+    color: var(--text);
+  }
+
+  .loadtest-panel {
+    position: fixed;
+    bottom: 52px;
+    right: 16px;
+    width: 320px;
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px;
+    z-index: 100;
+    display: none;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+  }
+
+  .loadtest-panel.visible { display: block; }
+
+  .loadtest-panel h3 {
+    font-size: 14px;
+    font-weight: 600;
+    margin-bottom: 12px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .lt-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 10px;
+    font-size: 12px;
+  }
+
+  .lt-row label { color: var(--text-dim); }
+
+  .lt-row input[type="range"] {
+    width: 120px;
+    accent-color: var(--accent);
+  }
+
+  .lt-row .lt-val {
+    font-family: 'JetBrains Mono', monospace;
+    color: var(--text);
+    min-width: 40px;
+    text-align: right;
+    font-size: 12px;
+  }
+
+  .lt-stats {
+    font-size: 11px;
+    color: var(--text-dim);
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+
+  .lt-stats span { color: var(--text); font-family: 'JetBrains Mono', monospace; }
+
+  .lt-btn {
+    width: 100%;
+    padding: 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg3);
+    color: var(--text);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    margin-top: 10px;
+    transition: all 0.2s;
+  }
+
+  .lt-btn:hover { border-color: var(--accent); }
+  .lt-btn.running { background: rgba(255, 107, 107, 0.15); border-color: var(--red); color: var(--red); }
+  .lt-btn.running:hover { background: rgba(255, 107, 107, 0.25); }
+
+  /* Responsive */
+  @media (max-width: 900px) {
+    .main { grid-template-columns: 1fr; }
+    .stream-panel { height: 280px; border-left: none; border-top: 1px solid var(--border); }
+    .pipeline { padding: 12px 16px; }
+    .pipe-node { min-width: 100px; padding: 10px 12px; }
+    .pipe-stat { font-size: 16px; }
+  }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 5px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+</style>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+
+<div class="header">
+  <h1>⟁ Flux</h1>
+  <div class="subtitle">World State Engine</div>
+  <div class="status">
+    <div class="status-dot" id="wsStatus"></div>
+    <span id="wsLabel">Connecting…</span>
+  </div>
+</div>
+
+<div class="pipeline">
+  <div class="pipe-node" id="pipePublishers">
+    <div class="pipe-label">Publishers</div>
+    <div class="pipe-stats">
+      <div class="pipe-stat green" id="pipeActiveCount">-</div>
+      <div class="pipe-desc">active sources</div>
+    </div>
+  </div>
+
+  <div class="pipe-arrow" id="arrow1">
+    <svg viewBox="0 0 32 20">
+      <line class="arrow-line" x1="2" y1="10" x2="26" y2="10"/>
+      <polygon class="arrow-head" points="24,6 32,10 24,14"/>
+      <circle class="arrow-particle" r="3" cy="10" cx="2"/>
+    </svg>
+  </div>
+
+  <div class="pipe-node" id="pipeEvents">
+    <div class="pipe-label">Events API</div>
+    <div class="pipe-stats">
+      <div class="pipe-stat blue" id="pipeEps">-</div>
+      <div class="pipe-desc">events / sec</div>
+    </div>
+  </div>
+
+  <div class="pipe-arrow" id="arrow2">
+    <svg viewBox="0 0 32 20">
+      <line class="arrow-line" x1="2" y1="10" x2="26" y2="10"/>
+      <polygon class="arrow-head" points="24,6 32,10 24,14"/>
+      <circle class="arrow-particle" r="3" cy="10" cx="2"/>
+    </svg>
+  </div>
+
+  <div class="pipe-node" id="pipeNats">
+    <div class="pipe-label">NATS JetStream</div>
+    <div class="pipe-stats">
+      <div class="pipe-stat purple" id="pipeTotalEvents">-</div>
+      <div class="pipe-desc">total events</div>
+    </div>
+  </div>
+
+  <div class="pipe-arrow" id="arrow3">
+    <svg viewBox="0 0 32 20">
+      <line class="arrow-line" x1="2" y1="10" x2="26" y2="10"/>
+      <polygon class="arrow-head" points="24,6 32,10 24,14"/>
+      <circle class="arrow-particle" r="3" cy="10" cx="2"/>
+    </svg>
+  </div>
+
+  <div class="pipe-node" id="pipeEngine">
+    <div class="pipe-label">Flux Engine</div>
+    <div class="pipe-stats">
+      <div class="pipe-stat orange" id="pipeEntityCount">-</div>
+      <div class="pipe-desc">entities materialized</div>
+    </div>
+  </div>
+
+  <div class="pipe-arrow" id="arrow4">
+    <svg viewBox="0 0 32 20">
+      <line class="arrow-line" x1="2" y1="10" x2="26" y2="10"/>
+      <polygon class="arrow-head" points="24,6 32,10 24,14"/>
+      <circle class="arrow-particle" r="3" cy="10" cx="2"/>
+    </svg>
+  </div>
+
+  <div class="pipe-node" id="pipeApi">
+    <div class="pipe-label">REST · WebSocket</div>
+    <div class="pipe-stats">
+      <div class="pipe-stat green" id="pipeWsClients">-</div>
+      <div class="pipe-desc">live subscribers</div>
+    </div>
+  </div>
+</div>
+
+<div class="main">
+  <div class="aether">
+    <div class="aether-title"><span>◈</span> Entity State <span id="namespaceIndicator" style="margin-left:auto;font-size:11px;color:var(--text-dim);display:none"></span></div>
+    <div style="display:flex;gap:8px;margin-bottom:8px;align-items:center">
+      <label style="font-size:11px;color:var(--text-dim)">Server prefix:</label>
+      <input id="serverPrefix" type="text" placeholder="e.g. host-, arc/" style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:4px 10px;color:var(--text);font-size:12px;width:160px;font-family:'JetBrains Mono',monospace" />
+      <button onclick="applyServerPrefix()" style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:4px 12px;color:var(--text);font-size:12px;cursor:pointer">Apply</button>
+      <button onclick="document.getElementById('serverPrefix').value='';applyServerPrefix()" style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:4px 12px;color:var(--text-dim);font-size:12px;cursor:pointer">Clear</button>
+    </div>
+    <div class="entity-filter" id="entityFilter"></div>
+    <div class="entity-groups" id="entityGroups"></div>
+  </div>
+
+  <div class="stream-panel">
+    <div class="stream-header">
+      ⚡ Event Stream
+      <span class="count" id="eventCount">0 events</span>
+    </div>
+    <div class="stream-events" id="streamEvents"></div>
+  </div>
+</div>
+
+<button class="loadtest-toggle" onclick="toggleLoadTest()">🔥 Load Test</button>
+
+<div class="loadtest-panel" id="loadtestPanel">
+  <h3>🔥 Load Generator</h3>
+  <div class="lt-row">
+    <label>Events/sec</label>
+    <input type="range" id="ltRate" min="1" max="10000" value="100" oninput="updateLtLabels()">
+    <span class="lt-val" id="ltRateVal">10</span>
+  </div>
+  <div class="lt-row">
+    <label>Entities</label>
+    <input type="range" id="ltEntities" min="1" max="10000" value="50" oninput="updateLtLabels()">
+    <span class="lt-val" id="ltEntitiesVal">5</span>
+  </div>
+  <div class="lt-row">
+    <label>Batch size</label>
+    <input type="range" id="ltBatch" min="10" max="1000" value="100" oninput="updateLtLabels()">
+    <span class="lt-val" id="ltBatchVal">50</span>
+  </div>
+  <div class="lt-row">
+    <label>Duration (s)</label>
+    <input type="range" id="ltDuration" min="0" max="600" value="60" step="10" oninput="updateLtLabels()">
+    <span class="lt-val" id="ltDurationVal">60</span>
+  </div>
+  <div class="lt-row">
+    <label>Prefix</label>
+    <input type="text" id="ltPrefix" value="loadtest" 
+      style="background:var(--bg3);border:1px solid var(--border);border-radius:4px;padding:4px 8px;color:var(--text);font-size:12px;width:120px;font-family:'JetBrains Mono',monospace;">
+  </div>
+  <div class="lt-row" style="font-size:10px;color:var(--text-dim);justify-content:center;">
+    ⚡ Runs on dedicated load-gen VM (192.168.50.40)
+  </div>
+  <button class="lt-btn" id="ltBtn" onclick="toggleLoadTestRun()">▶ Start</button>
+  <div class="lt-stats" id="ltStats" style="display:none">
+    <div>Sent: <span id="ltSent">0</span></div>
+    <div>Errors: <span id="ltErrors">0</span></div>
+    <div>Actual rate: <span id="ltActualRate">0</span>/s</div>
+    <div>Elapsed: <span id="ltElapsed">0s</span></div>
+  </div>
+</div>
+
+<script>
+const ENTITY_TYPES = {
+  sensors: { match: /^sensor-/, icon: '🌡', color: '#4fc3f7', label: 'Sensors' },
+  hosts: { match: /^host-/, icon: '🖥', color: '#ff9f43', label: 'Hosts' },
+  devices: { match: /^(giga|click-plc|sense-hat)-/, icon: '⚙', color: '#a855f7', label: 'Devices' },
+  agents: { match: /^(arc|etl)-/, icon: '🤖', color: '#6c5ce7', label: 'Agents' },
+  namespaced: { match: /^[a-zA-Z0-9]+\//, icon: '📂', color: '#00d2a0', label: 'Namespaced' },
+  loadtest: { match: /^loadtest-/, icon: '🔥', color: '#e74c3c', label: 'Load Test', hidden: true },
+  other: { match: /.*/, icon: '◇', color: '#6a6a80', label: 'Other' }
+};
+
+// Filter state — hidden groups won't render
+let hiddenTypes = new Set(['loadtest']);
+
+const STALE_THRESHOLD = 120000; // 2 minutes
+
+let entities = {};
+let eventCount = 0;
+let lastFlowTime = 0;
+
+function classifyEntity(id) {
+  for (const [type, cfg] of Object.entries(ENTITY_TYPES)) {
+    if (type !== 'other' && cfg.match.test(id)) return type;
+  }
+  return 'other';
+}
+
+function timeAgo(ts) {
+  const diff = Date.now() - new Date(ts).getTime();
+  if (diff < 5000) return 'just now';
+  if (diff < 60000) return Math.floor(diff/1000) + 's ago';
+  if (diff < 3600000) return Math.floor(diff/60000) + 'm ago';
+  if (diff < 86400000) return Math.floor(diff/3600000) + 'h ago';
+  return Math.floor(diff/86400000) + 'd ago';
+}
+
+function isStale(ts) {
+  return (Date.now() - new Date(ts).getTime()) > STALE_THRESHOLD;
+}
+
+function formatValue(v) {
+  if (typeof v === 'number') return Number.isInteger(v) ? v.toString() : v.toFixed(2);
+  if (typeof v === 'boolean') return v ? '✓' : '✗';
+  if (Array.isArray(v)) return v.join(', ');
+  return String(v);
+}
+
+function getBarColor(val) {
+  if (val < 40) return 'var(--green)';
+  if (val < 70) return 'var(--yellow)';
+  return 'var(--red)';
+}
+
+function isPercentLike(key, val) {
+  return typeof val === 'number' && (key.includes('percent') || key.includes('humidity')) && val >= 0 && val <= 100;
+}
+
+function updatePipeline() {
+  const now = Date.now();
+  const flowing = (now - lastFlowTime) < 2000;
+
+  // Highlight active pipeline nodes based on recent activity
+  document.getElementById('pipeEvents').classList.toggle('active', flowing);
+  document.getElementById('pipeEngine').classList.toggle('active', flowing);
+}
+
+function updateMetrics(msg) {
+  // Update metrics from server
+  document.getElementById('pipeEntityCount').textContent = msg.entities.total;
+  document.getElementById('pipeEps').textContent = msg.events.rate_per_second.toFixed(1);
+  document.getElementById('pipeTotalEvents').textContent = msg.events.total.toLocaleString();
+  document.getElementById('pipeActiveCount').textContent = msg.publishers.active;
+  document.getElementById('pipeWsClients').textContent = msg.websocket.connections;
+
+  // Update visual flow state based on event rate
+  const flowing = msg.events.rate_per_second > 0;
+  document.getElementById('pipePublishers').classList.toggle('active', msg.publishers.active > 0);
+  document.querySelectorAll('.pipe-arrow').forEach(a => {
+    a.classList.toggle('flowing', flowing);
+  });
+}
+
+const MAX_VISIBLE_ENTITIES = 20; // per group before auto-collapse
+const collapsedGroups = new Set();
+
+let entitySearchFilter = '';
+
+function renderFilterBar() {
+  const filterEl = document.getElementById('entityFilter');
+  // Count entities per type
+  const counts = {};
+  for (const [id] of Object.entries(entities)) {
+    const type = classifyEntity(id);
+    counts[type] = (counts[type] || 0) + 1;
+  }
+  
+  filterEl.innerHTML = `
+    <input class="filter-search" type="text" placeholder="🔍 Filter entities..." value="${entitySearchFilter}" oninput="entitySearchFilter=this.value;renderEntities()">
+    ${Object.entries(ENTITY_TYPES).map(([type, cfg]) => {
+      const count = counts[type] || 0;
+      const isHidden = hiddenTypes.has(type);
+      return `<span class="filter-chip ${isHidden ? 'hidden' : 'active'}" onclick="toggleTypeFilter('${type}')">${cfg.icon} ${cfg.label} (${count})</span>`;
+    }).join('')}
+  `;
+}
+
+function toggleTypeFilter(type) {
+  if (hiddenTypes.has(type)) hiddenTypes.delete(type);
+  else hiddenTypes.add(type);
+  renderFilterBar();
+  renderEntities();
+}
+
+function renderEntities() {
+  const groups = {};
+  for (const [id, entity] of Object.entries(entities)) {
+    if (entitySearchFilter && !id.toLowerCase().includes(entitySearchFilter.toLowerCase())) continue;
+    const type = classifyEntity(id);
+    if (hiddenTypes.has(type)) continue;
+    if (!groups[type]) groups[type] = [];
+    groups[type].push({ id, ...entity });
+  }
+
+  const container = document.getElementById('entityGroups');
+  // Preserve expanded entity state
+  const expanded = new Set();
+  container.querySelectorAll('.entity-node.expanded').forEach(el => {
+    expanded.add(el.id.replace('entity-', ''));
+  });
+
+  container.innerHTML = '';
+
+  for (const [type, cfg] of Object.entries(ENTITY_TYPES)) {
+    if (!groups[type] || groups[type].length === 0) continue;
+    
+    const items = groups[type].sort((a, b) => a.id.localeCompare(b.id));
+    const autoCollapse = items.length > MAX_VISIBLE_ENTITIES;
+    const isCollapsed = collapsedGroups.has(type) || (autoCollapse && !collapsedGroups.has('_expanded_' + type));
+    
+    const group = document.createElement('div');
+    group.className = 'entity-group' + (isCollapsed ? ' collapsed' : '');
+    
+    const activeCount = items.filter(e => !isStale(e.lastUpdated)).length;
+    const warningCount = items.filter(e => e.properties?.status === 'warning').length;
+    
+    const displayItems = isCollapsed ? [] : items.slice(0, 200); // hard cap at 200 rendered
+    
+    group.innerHTML = `
+      <div class="group-label" onclick="toggleGroup('${type}')">
+        <span class="group-toggle">▼</span>
+        <span class="group-icon" style="background:${cfg.color}22;color:${cfg.color}">${cfg.icon}</span>
+        ${cfg.label} (${items.length})
+      </div>
+      <div class="group-summary">${activeCount} active${warningCount ? ', ' + warningCount + ' warning' : ''} — click to expand</div>
+      ${displayItems.map(e => {
+        const status = e.properties?.status || '';
+        const stale = isStale(e.lastUpdated);
+        const exp = expanded.has(e.id) ? ' expanded' : '';
+        return `
+          <div class="entity-node${stale ? ' stale' : ''}${exp}" id="entity-${e.id}" onclick="toggleEntity('${e.id}')">
+            <div class="entity-header">
+              <span class="entity-name">${e.id}</span>
+              ${status ? `<span class="entity-status ${status}">${status}</span>` : ''}
+            </div>
+            <div class="entity-time">${timeAgo(e.lastUpdated)}</div>
+            <div class="entity-props">
+              ${Object.entries(e.properties || {}).sort(([a],[b]) => a.localeCompare(b)).map(([k, v]) => `
+                <div class="prop-row">
+                  <span class="prop-key">${k}</span>
+                  <span class="prop-val" id="prop-${e.id}-${k}">${formatValue(v)}</span>
+                </div>
+                ${isPercentLike(k, v) ? `
+                  <div class="prop-bar">
+                    <div class="prop-bar-fill" style="width:${v}%;background:${getBarColor(v)}"></div>
+                  </div>
+                ` : ''}
+              `).join('')}
+            </div>
+          </div>
+        `;
+      }).join('')}
+      ${!isCollapsed && items.length > 200 ? `<div class="group-summary" style="display:block">...and ${items.length - 200} more</div>` : ''}
+    `;
+    container.appendChild(group);
+  }
+}
+
+function toggleGroup(type) {
+  const wasCollapsed = collapsedGroups.has(type);
+  if (wasCollapsed) {
+    collapsedGroups.delete(type);
+    collapsedGroups.add('_expanded_' + type);
+  } else {
+    collapsedGroups.add(type);
+    collapsedGroups.delete('_expanded_' + type);
+  }
+  renderEntities();
+}
+
+function toggleEntity(id) {
+  const el = document.getElementById(`entity-${id}`);
+  if (el) el.classList.toggle('expanded');
+}
+
+function flashEntity(entityId) {
+  const el = document.getElementById(`entity-${entityId}`);
+  if (el) {
+    el.classList.remove('stale');
+    el.classList.add('flash');
+    setTimeout(() => el.classList.remove('flash'), 800);
+  }
+}
+
+// WS throttle — buffer updates and flush on RAF
+let pendingUpdates = [];
+let renderScheduled = false;
+let newEntitySeen = false;
+let streamEventBuffer = [];
+const MAX_STREAM_EVENTS_PER_FRAME = 5;
+
+function updateProperty(entityId, property, value, timestamp) {
+  if (!entities[entityId]) {
+    entities[entityId] = { properties: {}, lastUpdated: timestamp };
+    newEntitySeen = true;
+  }
+  entities[entityId].properties[property] = value;
+  entities[entityId].lastUpdated = timestamp;
+
+  const now = Date.now();
+  lastFlowTime = now;
+  eventCount++;
+
+  // Buffer stream events
+  streamEventBuffer.push({ entityId, property, value, timestamp });
+
+  // Schedule a render frame if not already scheduled
+  if (!renderScheduled) {
+    renderScheduled = true;
+    requestAnimationFrame(flushUpdates);
+  }
+}
+
+function flushUpdates() {
+  renderScheduled = false;
+  
+  const now = Date.now();
+  eventWindow = eventWindow.filter(t => t > now - 5000);
+  
+  // Update pipeline stats
+  updatePipeline();
+  
+  // Update event count display
+  document.getElementById('eventCount').textContent = eventCount + ' events';
+  
+  // Flash updated entities
+  const flashedSet = new Set();
+  for (const { entityId } of streamEventBuffer) {
+    if (!flashedSet.has(entityId)) {
+      flashedSet.add(entityId);
+      flashEntity(entityId);
+    }
+  }
+
+  // Add stream events (limited per frame)
+  const container = document.getElementById('streamEvents');
+  const eventsToShow = streamEventBuffer.slice(-MAX_STREAM_EVENTS_PER_FRAME);
+  for (const { entityId, property, value, timestamp } of eventsToShow) {
+    const time = new Date(timestamp).toLocaleTimeString();
+    const div = document.createElement('div');
+    div.className = 'stream-event';
+    div.innerHTML = `
+      <span class="event-time">${time}</span>
+      <span class="event-entity">${entityId}</span>.<span class="event-prop">${property}</span> = <span class="event-value">${formatValue(value)}</span>
+    `;
+    container.insertBefore(div, container.firstChild);
+  }
+  while (container.children.length > 200) container.removeChild(container.lastChild);
+  streamEventBuffer = [];
+  
+  // Re-render entities only if new ones appeared
+  if (newEntitySeen) {
+    newEntitySeen = false;
+    renderFilterBar();
+    renderEntities();
+  }
+}
+
+// Load initial state
+async function loadState() {
+  try {
+    const url = activeServerPrefix ? `/api/state/entities?prefix=${encodeURIComponent(activeServerPrefix)}` : '/api/state/entities';
+    const resp = await fetch(url);
+    const data = await resp.json();
+    for (const e of data) {
+      entities[e.id] = { properties: e.properties, lastUpdated: e.lastUpdated };
+    }
+    renderFilterBar();
+    renderEntities();
+    updatePipeline();
+  } catch (e) {
+    console.error('Failed to load state:', e);
+  }
+}
+
+// WebSocket
+function connectWS() {
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const ws = new WebSocket(`${proto}//${location.host}`);
+  
+  ws.onopen = () => {
+    document.getElementById('wsStatus').className = 'status-dot';
+    document.getElementById('wsLabel').textContent = 'Live';
+    ws.send(JSON.stringify({ type: 'subscribe', entity_id: '*' }));
+    // Re-sync state on reconnect (handles Flux restarts)
+    entities = {};
+    eventCount = 0;
+    loadState();
+  };
+  
+  ws.onmessage = (event) => {
+    try {
+      const msg = JSON.parse(event.data);
+      if (msg.type === 'state_update') {
+        updateProperty(msg.entity_id, msg.property, msg.value, msg.timestamp);
+      } else if (msg.type === 'metrics_update') {
+        updateMetrics(msg);
+      } else if (msg.type === 'entity_deleted') {
+        delete entities[msg.entity_id];
+        renderFilterBar();
+        renderEntities();
+      }
+    } catch (e) {}
+  };
+  
+  ws.onclose = () => {
+    document.getElementById('wsStatus').className = 'status-dot disconnected';
+    document.getElementById('wsLabel').textContent = 'Reconnecting…';
+    setTimeout(connectWS, 3000);
+  };
+  
+  ws.onerror = () => ws.close();
+}
+
+// Periodic updates
+setInterval(() => {
+  // Refresh time-ago and stale state
+  for (const [id, e] of Object.entries(entities)) {
+    const el = document.getElementById(`entity-${id}`);
+    if (el) {
+      const timeEl = el.querySelector('.entity-time');
+      if (timeEl) timeEl.textContent = timeAgo(e.lastUpdated);
+      el.classList.toggle('stale', isStale(e.lastUpdated));
+    }
+  }
+  updatePipeline();
+}, 5000);
+
+// Server-side prefix filtering
+let activeServerPrefix = '';
+
+function applyServerPrefix() {
+  activeServerPrefix = document.getElementById('serverPrefix').value.trim();
+  entities = {};
+  eventCount = 0;
+  loadState();
+}
+
+// Check for namespaces (informational)
+async function checkNamespaces() {
+  try {
+    const resp = await fetch('/api/namespaces');
+    if (resp.ok) {
+      const data = await resp.json();
+      if (Array.isArray(data) && data.length > 0) {
+        const el = document.getElementById('namespaceIndicator');
+        el.style.display = 'inline';
+        el.textContent = `📂 ${data.length} namespace${data.length > 1 ? 's' : ''}: ${data.map(n => n.name || n).join(', ')}`;
+      }
+    }
+  } catch(e) {}
+}
+checkNamespaces();
+
+loadState();
+connectWS();
+
+// ============ Load Test (Server-Side via load-gen VM) ============
+let ltRunning = false;
+let ltPollInterval = null;
+
+function toggleLoadTest() {
+  document.getElementById('loadtestPanel').classList.toggle('visible');
+}
+
+function updateLtLabels() {
+  document.getElementById('ltRateVal').textContent = document.getElementById('ltRate').value;
+  document.getElementById('ltEntitiesVal').textContent = document.getElementById('ltEntities').value;
+  document.getElementById('ltBatchVal').textContent = document.getElementById('ltBatch').value;
+  const dur = document.getElementById('ltDuration').value;
+  document.getElementById('ltDurationVal').textContent = dur === '0' ? '∞' : dur;
+}
+
+function toggleLoadTestRun() {
+  if (ltRunning) stopLoadTest();
+  else startLoadTest();
+}
+
+async function startLoadTest() {
+  const rate = parseInt(document.getElementById('ltRate').value);
+  const entities = parseInt(document.getElementById('ltEntities').value);
+  const batchSize = parseInt(document.getElementById('ltBatch').value);
+  const duration = parseInt(document.getElementById('ltDuration').value);
+  const prefix = document.getElementById('ltPrefix').value || 'loadtest';
+
+  try {
+    const resp = await fetch('/loadtest/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rate, entities, batchSize, duration, prefix })
+    });
+    const data = await resp.json();
+    if (resp.status === 409) {
+      alert('Load test already running!');
+      return;
+    }
+    if (!resp.ok) {
+      alert('Failed to start: ' + (data.error || 'unknown'));
+      return;
+    }
+  } catch(e) {
+    alert('Failed to connect: ' + e.message);
+    return;
+  }
+
+  ltRunning = true;
+  const btn = document.getElementById('ltBtn');
+  btn.textContent = '■ Stop';
+  btn.classList.add('running');
+  document.getElementById('ltStats').style.display = 'block';
+
+  // Poll for stats
+  ltPollInterval = setInterval(async () => {
+    try {
+      const resp = await fetch('/loadtest/status');
+      const stats = await resp.json();
+      document.getElementById('ltSent').textContent = stats.sent.toLocaleString();
+      document.getElementById('ltErrors').textContent = stats.errors.toLocaleString();
+      document.getElementById('ltActualRate').textContent = stats.rate;
+      document.getElementById('ltElapsed').textContent = stats.elapsed + 's';
+
+      if (!stats.running) {
+        ltRunning = false;
+        clearInterval(ltPollInterval);
+        const btn = document.getElementById('ltBtn');
+        btn.textContent = '▶ Start';
+        btn.classList.remove('running');
+      }
+    } catch(e) {}
+  }, 2000);
+}
+
+async function stopLoadTest() {
+  try {
+    await fetch('/loadtest/stop', { method: 'POST' });
+  } catch(e) {}
+
+  ltRunning = false;
+  if (ltPollInterval) clearInterval(ltPollInterval);
+  ltPollInterval = null;
+
+  const btn = document.getElementById('ltBtn');
+  btn.textContent = '▶ Start';
+  btn.classList.remove('running');
+}
+</script>
+</body>
+</html>

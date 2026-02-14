@@ -1,4 +1,5 @@
 use super::*;
+use crate::event::FluxEvent;
 use chrono::Utc;
 use serde_json::json;
 use std::sync::Arc;
@@ -258,4 +259,77 @@ fn test_load_from_empty_snapshot() {
     assert!(engine.get_entity("entity1").is_none());
     assert_eq!(engine.get_all_entities().len(), 0);
     assert_eq!(engine.get_last_processed_sequence(), 0);
+}
+
+#[test]
+fn test_delete_entity() {
+    let engine = StateEngine::new();
+
+    // Create entity
+    engine.update_property("test_entity", "value", json!(42));
+    assert!(engine.get_entity("test_entity").is_some());
+
+    // Delete entity
+    let removed = engine.delete_entity("test_entity");
+    assert!(removed.is_some());
+    assert_eq!(removed.unwrap().id, "test_entity");
+
+    // Verify entity is gone
+    assert!(engine.get_entity("test_entity").is_none());
+}
+
+#[test]
+fn test_delete_nonexistent_entity() {
+    let engine = StateEngine::new();
+
+    // Delete entity that doesn't exist
+    let removed = engine.delete_entity("nonexistent");
+    assert!(removed.is_none());
+}
+
+#[test]
+fn test_tombstone_event_deletes_entity() {
+    let engine = StateEngine::new();
+
+    // Create entity
+    engine.update_property("test_entity", "value", json!(42));
+    assert!(engine.get_entity("test_entity").is_some());
+
+    // Process tombstone event
+    let tombstone = FluxEvent {
+        event_id: Some("test_event".to_string()),
+        stream: "test".to_string(),
+        source: "test".to_string(),
+        timestamp: Utc::now().timestamp_millis(),
+        key: Some("test_entity".to_string()),
+        schema: None,
+        payload: json!({
+            "entity_id": "test_entity",
+            "properties": {
+                "__deleted__": true,
+                "__deleted_at__": Utc::now().timestamp_millis()
+            }
+        }),
+    };
+
+    engine.process_event(&tombstone);
+
+    // Verify entity is deleted
+    assert!(engine.get_entity("test_entity").is_none());
+}
+
+#[test]
+fn test_deletion_broadcast() {
+    let engine = Arc::new(StateEngine::new());
+
+    // Subscribe to deletions
+    let mut deletion_rx = engine.subscribe_deletions();
+
+    // Create and delete entity
+    engine.update_property("test_entity", "value", json!(42));
+    engine.delete_entity("test_entity");
+
+    // Receive deletion event
+    let deleted = deletion_rx.try_recv().unwrap();
+    assert_eq!(deleted.entity_id, "test_entity");
 }

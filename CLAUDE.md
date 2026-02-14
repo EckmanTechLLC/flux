@@ -65,6 +65,17 @@
 - [x] Task 6: Entity query filtering & discovery
 - [x] Task 7: Configuration & documentation
 
+### Phase 4A: Real-Time Metrics & Entity Management (COMPLETE ✅ 2026-02-14)
+- [x] ADR-004: Real-Time Metrics and Deletion
+- [x] Task 1: Metrics tracking core (lock-free counters, sliding window)
+- [x] Task 2: Metrics broadcasting (separate channel, background task)
+- [x] Task 3: WebSocket metrics integration (protocol, manager updates)
+- [x] Task 4: Delete event handling (tombstone detection, entity removal)
+- [x] Task 5: DELETE API endpoints (single + batch with filters)
+- [x] Task 6: Configuration support (centralized config, TOML loading)
+- [x] Task 7: UI updates (real-time metrics, removed fake calculations)
+- [x] Task 8: Documentation (ADR, API reference, README)
+
 **Deployments:**
 - Private test instance on etl-bot (Cloudflare tunnel + systemd, contact for access)
 - OpenClaw skill published to ClawHub registry (flux@1.0.0)
@@ -75,6 +86,7 @@
 - NATS monitoring: 8223
 - Flux WebSocket API: 3000
 - Flux HTTP API: 3000
+- Flux UI: 8082
 
 ---
 
