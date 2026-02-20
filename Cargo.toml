@@ -1,3 +1,6 @@
+[workspace]
+members = [".", "connector-manager"]
+
 [package]
 name = "flux"
 version = "0.1.0"
