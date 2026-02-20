@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   # NATS with JetStream - Event backbone
   nats:
@@ -29,6 +27,13 @@ services:
     environment:
       - NATS_URL=nats://nats:4222
       - PORT=3000
+      - FLUX_ENCRYPTION_KEY=${FLUX_ENCRYPTION_KEY}
+      - FLUX_CREDENTIALS_DB=/data/credentials.db
+      - FLUX_OAUTH_GITHUB_CLIENT_ID=${FLUX_OAUTH_GITHUB_CLIENT_ID}
+      - FLUX_OAUTH_GITHUB_CLIENT_SECRET=${FLUX_OAUTH_GITHUB_CLIENT_SECRET}
+      - FLUX_OAUTH_CALLBACK_BASE_URL=${FLUX_OAUTH_CALLBACK_BASE_URL}
+    volumes:
+      - ./data:/data
     ports:
       - "3000:3000"
     networks:
@@ -41,6 +46,51 @@ services:
         limits:
           cpus: '1.0'
           memory: 512M
+
+  # Flux UI - Web interface
+  flux-ui:
+    build:
+      context: ./ui
+      dockerfile: Dockerfile
+    container_name: flux-ui
+    environment:
+      - FLUX_API=http://flux:3000
+      - FLUX_WS=ws://flux:3000/api/ws
+    ports:
+      - "8082:8082"
+    networks:
+      - flux-network
+    depends_on:
+      - flux
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 128M
+
+  # Connector Manager - Runs scheduled connectors (GitHub, etc.)
+  connector-manager:
+    build:
+      context: .
+      dockerfile: connector-manager/Dockerfile
+    container_name: connector-manager
+    environment:
+      - FLUX_API_URL=http://flux:3000
+      - FLUX_ENCRYPTION_KEY=${FLUX_ENCRYPTION_KEY}
+      - FLUX_CREDENTIALS_DB=/data/credentials.db
+    volumes:
+      - ./data:/data
+    networks:
+      - flux-network
+    depends_on:
+      - flux
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
 
 networks:
   flux-network:

@@ -1,0 +1,18 @@
+# Rust build artifacts
+target/
+connector-manager/target/
+
+# Git
+.git/
+
+# Runtime data
+data/
+
+# Docs
+docs/
+
+# Editor/OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
