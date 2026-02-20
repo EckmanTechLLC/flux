@@ -1,7 +1,6 @@
 # Flux API Reference
 
-**Status:** Phase 1 Implementation
-**Last Updated:** 2026-02-11
+**Last Updated:** 2026-02-20
 
 ---
 
@@ -9,10 +8,27 @@
 
 Flux exposes two primary APIs:
 
-- **HTTP REST API** - Event ingestion and state queries
+- **HTTP REST API** - Event ingestion, state queries, namespace management, connector management, admin config
 - **WebSocket API** - Real-time state subscriptions
 
 **Base URL (local):** `http://localhost:3000` / `ws://localhost:3000`
+
+---
+
+## Authentication
+
+**Two modes (controlled by `FLUX_AUTH_ENABLED` / `config.toml`):**
+
+**Internal mode** (`auth_enabled = false`, default):
+- No authentication required on any endpoint
+- Suitable for trusted networks, local development
+
+**Public mode** (`auth_enabled = true`):
+- Write operations require `Authorization: Bearer <token>` header
+- Token is issued at namespace registration
+- Read operations (GET state, WebSocket subscribe) remain open
+- WebSocket upgrade requires `?token=<bearer-token>` query parameter
+- Admin config writes require `Authorization: Bearer <admin-token>` (separate token via `FLUX_ADMIN_TOKEN`)
 
 ---
 
@@ -29,6 +45,7 @@ Publish a single event to Flux.
 ```http
 POST /api/events HTTP/1.1
 Content-Type: application/json
+Authorization: Bearer <token>  # Required when auth enabled
 
 {
   "stream": "sensors",
@@ -51,7 +68,7 @@ Content-Type: application/json
 - `timestamp` (optional) - Unix epoch milliseconds. Defaults to current time if omitted.
 - `key` (optional) - Grouping/ordering key
 - `schema` (optional) - Schema metadata (not validated)
-- `payload` (required) - Event data (must be JSON object)
+- `payload` (required) - Event data (must be JSON object). **Limit: 1 MB.**
 
 **Payload structure for state derivation:**
 
@@ -79,19 +96,25 @@ For Flux to update state, payload must include:
 
 ```json
 // 400 Bad Request - Invalid event envelope
-{
-  "error": "Validation error: missing required field 'stream'"
-}
+{"error": "Validation error: missing required field 'stream'"}
 
 // 400 Bad Request - Invalid stream name
-{
-  "error": "Validation error: stream must be lowercase with optional dots"
-}
+{"error": "Validation error: stream must be lowercase with optional dots"}
+
+// 401 Unauthorized - Missing or invalid token (auth enabled)
+{"error": "Unauthorized"}
+
+// 403 Forbidden - Token does not own entity's namespace (auth enabled)
+{"error": "Forbidden"}
+
+// 413 Payload Too Large - Body exceeds 1 MB limit
+{"error": "payload too large"}
+
+// 429 Too Many Requests - Rate limit exceeded (auth enabled)
+{"error": "rate limit exceeded"}
 
 // 500 Internal Server Error - NATS publish failure
-{
-  "error": "Failed to publish event to NATS"
-}
+{"error": "Failed to publish event to NATS"}
 ```
 
 **curl example:**
@@ -122,6 +145,7 @@ Publish multiple events in a single request.
 ```http
 POST /api/events/batch HTTP/1.1
 Content-Type: application/json
+Authorization: Bearer <token>  # Required when auth enabled
 
 {
   "events": [
@@ -147,7 +171,7 @@ Content-Type: application/json
 
 **Request fields:**
 
-- `events` (required) - Array of FluxEvent objects (same structure as POST /api/events)
+- `events` (required) - Array of FluxEvent objects (same structure as POST /api/events). **Limit: 10 MB total.**
 
 **Response (200 OK):**
 
@@ -156,14 +180,8 @@ Content-Type: application/json
   "successful": 2,
   "failed": 0,
   "results": [
-    {
-      "eventId": "01933d7a-1234-7890-abcd-ef1234567890",
-      "stream": "sensors"
-    },
-    {
-      "eventId": "01933d7a-1234-7890-abcd-ef1234567891",
-      "stream": "sensors"
-    }
+    {"eventId": "01933d7a-1234-7890-abcd-ef1234567890", "stream": "sensors"},
+    {"eventId": "01933d7a-1234-7890-abcd-ef1234567891", "stream": "sensors"}
   ]
 }
 ```
@@ -177,13 +195,8 @@ If some events fail validation, successful events are still processed:
   "successful": 1,
   "failed": 1,
   "results": [
-    {
-      "eventId": "01933d7a-1234-7890-abcd-ef1234567890",
-      "stream": "sensors"
-    },
-    {
-      "error": "Validation error: missing required field 'stream'"
-    }
+    {"eventId": "01933d7a-1234-7890-abcd-ef1234567890", "stream": "sensors"},
+    {"error": "Validation error: missing required field 'stream'"}
   ]
 }
 ```
@@ -201,14 +214,6 @@ curl -X POST http://localhost:3000/api/events/batch \
         "payload": {
           "entity_id": "temp-sensor-01",
           "properties": {"temperature": 22.5}
-        }
-      },
-      {
-        "stream": "sensors",
-        "source": "sensor-02",
-        "payload": {
-          "entity_id": "temp-sensor-02",
-          "properties": {"temperature": 23.0}
         }
       }
     ]
@@ -229,6 +234,11 @@ List all entities in current state.
 GET /api/state/entities HTTP/1.1
 ```
 
+**Query parameters (optional):**
+
+- `?namespace=matt` - Filter by namespace
+- `?prefix=matt/sensor` - Filter by entity ID prefix
+
 **Response (200 OK):**
 
 ```json
@@ -240,28 +250,15 @@ GET /api/state/entities HTTP/1.1
       "unit": "celsius"
     },
     "last_updated": "2026-02-11T10:30:45.123Z"
-  },
-  {
-    "id": "temp-sensor-02",
-    "properties": {
-      "temperature": 23.0,
-      "unit": "celsius"
-    },
-    "last_updated": "2026-02-11T10:31:12.456Z"
   }
 ]
-```
-
-**Empty state:**
-
-```json
-[]
 ```
 
 **curl example:**
 
 ```bash
 curl http://localhost:3000/api/state/entities
+curl "http://localhost:3000/api/state/entities?namespace=matt"
 ```
 
 ---
@@ -269,12 +266,6 @@ curl http://localhost:3000/api/state/entities
 #### GET /api/state/entities/:id
 
 Get a specific entity by ID.
-
-**Request:**
-
-```http
-GET /api/state/entities/temp-sensor-01 HTTP/1.1
-```
 
 **Response (200 OK):**
 
@@ -293,10 +284,8 @@ GET /api/state/entities/temp-sensor-01 HTTP/1.1
 **Error responses:**
 
 ```json
-// 404 Not Found - Entity doesn't exist
-{
-  "error": "Entity not found: temp-sensor-99"
-}
+// 404 Not Found
+{"error": "Entity not found: temp-sensor-99"}
 ```
 
 **curl example:**
@@ -317,7 +306,7 @@ Delete a single entity by ID.
 
 ```http
 DELETE /api/state/entities/temp-sensor-01 HTTP/1.1
-Authorization: Bearer <token>  # Only if auth enabled
+Authorization: Bearer <token>  # Required when auth enabled
 ```
 
 **Response (200 OK):**
@@ -328,10 +317,6 @@ Authorization: Bearer <token>  # Only if auth enabled
   "eventId": "019c5c88-5386-7ae0-ab4d-80a8c1ce631a"
 }
 ```
-
-**Authorization:**
-- Auth disabled: Anyone can delete
-- Auth enabled: Must provide bearer token that owns the entity's namespace
 
 **curl example:**
 
@@ -355,7 +340,7 @@ Batch delete entities by filter.
 ```http
 POST /api/state/entities/delete HTTP/1.1
 Content-Type: application/json
-Authorization: Bearer <token>  # Only if auth enabled
+Authorization: Bearer <token>  # Required when auth enabled
 
 {
   "prefix": "loadtest-"
@@ -365,13 +350,8 @@ Authorization: Bearer <token>  # Only if auth enabled
 **Filter options (choose one):**
 
 ```json
-// Delete by namespace
 {"namespace": "matt"}
-
-// Delete by prefix
 {"prefix": "loadtest-"}
-
-// Delete specific entities
 {"entity_ids": ["id1", "id2", "id3"]}
 ```
 
@@ -388,23 +368,304 @@ Authorization: Bearer <token>  # Only if auth enabled
 **Limits:**
 - Maximum batch size: 10,000 entities (configurable via `max_batch_delete`)
 
-**Authorization:**
-- Auth disabled: Can delete any entities matching filter
-- Auth enabled: Can only delete entities in owned namespace
+**curl example:**
+
+```bash
+curl -X POST http://localhost:3000/api/state/entities/delete \
+  -H "Content-Type: application/json" \
+  -d '{"prefix": "loadtest-"}'
+```
+
+---
+
+### Namespace Management
+
+Namespaces are only available when `auth_enabled = true`. Returns 404 when auth is disabled.
+
+#### POST /api/namespaces
+
+Register a new namespace. Returns the bearer token for use in subsequent requests.
+
+**Request:**
+
+```http
+POST /api/namespaces HTTP/1.1
+Content-Type: application/json
+
+{
+  "name": "matt"
+}
+```
+
+**Name rules:** 3–32 characters, `[a-z0-9-_]` only.
+
+**Response (200 OK):**
+
+```json
+{
+  "namespaceId": "ns_7x9f2a",
+  "name": "matt",
+  "token": "550e8400-e29b-41d4-a716-446655440000"
+}
+```
+
+**Note:** `token` is only returned at registration. Store it — it cannot be retrieved later.
+
+**Error responses:**
+
+```json
+// 400 Bad Request - Invalid name
+{"error": "Namespace name too short (minimum 3 characters)"}
+
+// 409 Conflict - Name already taken
+{"error": "Namespace name already exists"}
+```
 
 **curl example:**
 
 ```bash
-# Delete by prefix
-curl -X POST http://localhost:3000/api/state/entities/delete \
+curl -X POST http://localhost:3000/api/namespaces \
   -H "Content-Type: application/json" \
-  -d '{"prefix": "loadtest-"}'
+  -d '{"name": "matt"}'
+```
 
-# Delete by namespace (with auth)
-curl -X POST http://localhost:3000/api/state/entities/delete \
+---
+
+#### GET /api/namespaces/:name
+
+Look up an existing namespace (token is not included in response).
+
+**Response (200 OK):**
+
+```json
+{
+  "namespaceId": "ns_7x9f2a",
+  "name": "matt",
+  "createdAt": "2026-02-20T10:00:00Z",
+  "entityCount": 42
+}
+```
+
+**curl example:**
+
+```bash
+curl http://localhost:3000/api/namespaces/matt
+```
+
+---
+
+### Connector Management
+
+Connectors pull data from external APIs and publish events to Flux. Implemented: `github`. Planned (framework ready, connector not yet built): `gmail`, `linkedin`, `calendar`.
+
+Credential storage requires `FLUX_ENCRYPTION_KEY` to be set. Without it, all connectors report `not_configured`.
+
+#### GET /api/connectors
+
+List all available connectors with status.
+
+**Request:**
+
+```http
+GET /api/connectors HTTP/1.1
+Authorization: Bearer <token>  # Required when auth enabled
+```
+
+**Response (200 OK):**
+
+```json
+{
+  "connectors": [
+    {"name": "github", "enabled": true, "status": "configured"},
+    {"name": "gmail", "enabled": false, "status": "not_configured"},
+    {"name": "linkedin", "enabled": false, "status": "not_configured"},
+    {"name": "calendar", "enabled": false, "status": "not_configured"}
+  ]
+}
+```
+
+**Status values:** `configured`, `not_configured`, `error`
+
+**curl example:**
+
+```bash
+curl http://localhost:3000/api/connectors
+curl http://localhost:3000/api/connectors -H "Authorization: Bearer <token>"
+```
+
+---
+
+#### GET /api/connectors/:name
+
+Get detailed status for a specific connector.
+
+**Response (200 OK):**
+
+```json
+{
+  "name": "github",
+  "enabled": true,
+  "status": "configured",
+  "last_poll": null,
+  "last_error": null,
+  "poll_interval_seconds": 300
+}
+```
+
+**Poll intervals:** github=300s (implemented). gmail/linkedin/calendar intervals are planned defaults, not yet active.
+
+**curl example:**
+
+```bash
+curl http://localhost:3000/api/connectors/github
+```
+
+---
+
+#### POST /api/connectors/:name/token
+
+Store a Personal Access Token (PAT) for a connector. Enables the connector.
+
+**Request:**
+
+```http
+POST /api/connectors/github/token HTTP/1.1
+Content-Type: application/json
+Authorization: Bearer <token>  # Required when auth enabled
+
+{
+  "token": "ghp_xxxxxxxxxxxxxxxxxxxx"
+}
+```
+
+**Response (200 OK):**
+
+```json
+{"success": true}
+```
+
+**Error responses:**
+
+```json
+// 404 Not Found - Unknown connector name
+{"error": "Connector 'unknown' not found"}
+
+// 500 Internal Server Error - FLUX_ENCRYPTION_KEY not set
+{"error": "Credential storage not available (FLUX_ENCRYPTION_KEY not set)"}
+```
+
+**curl example:**
+
+```bash
+curl -X POST http://localhost:3000/api/connectors/github/token \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer <your-token>" \
-  -d '{"namespace": "matt"}'
+  -d '{"token": "ghp_xxxxxxxxxxxxxxxxxxxx"}'
+```
+
+---
+
+#### DELETE /api/connectors/:name/token
+
+Remove stored credentials for a connector. Disables the connector.
+
+**Request:**
+
+```http
+DELETE /api/connectors/github/token HTTP/1.1
+Authorization: Bearer <token>  # Required when auth enabled
+```
+
+**Response (200 OK):**
+
+```json
+{"success": true}
+```
+
+**Error responses:**
+
+```json
+// 404 Not Found - No credentials stored
+{"error": "No credentials found for connector 'github'"}
+```
+
+**curl example:**
+
+```bash
+curl -X DELETE http://localhost:3000/api/connectors/github/token
+```
+
+---
+
+### Admin Config
+
+Runtime configuration for security limits. Changes take effect immediately — no restart required.
+
+`GET` is readable by any authenticated user. `PUT` requires the admin bearer token (`FLUX_ADMIN_TOKEN`). When `FLUX_ADMIN_TOKEN` is not set, `PUT` is unrestricted (dev mode).
+
+#### GET /api/admin/config
+
+Read current runtime configuration.
+
+**Response (200 OK):**
+
+```json
+{
+  "rate_limit_enabled": true,
+  "rate_limit_per_namespace_per_minute": 10000,
+  "body_size_limit_single_bytes": 1048576,
+  "body_size_limit_batch_bytes": 10485760
+}
+```
+
+**curl example:**
+
+```bash
+curl http://localhost:3000/api/admin/config
+```
+
+---
+
+#### PUT /api/admin/config
+
+Update one or more runtime config fields. Only fields present in the request body are changed.
+
+**Request:**
+
+```http
+PUT /api/admin/config HTTP/1.1
+Content-Type: application/json
+Authorization: Bearer <admin-token>
+
+{
+  "rate_limit_per_namespace_per_minute": 5000
+}
+```
+
+**Configurable fields:**
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `rate_limit_enabled` | bool | true | Enable/disable rate limiting (auth mode only) |
+| `rate_limit_per_namespace_per_minute` | u64 | 10000 | Max events per namespace per minute |
+| `body_size_limit_single_bytes` | usize | 1048576 | Max body for POST /api/events (1 MB) |
+| `body_size_limit_batch_bytes` | usize | 10485760 | Max body for POST /api/events/batch (10 MB) |
+
+**Response (200 OK):** Returns full updated config (same format as GET).
+
+**Error responses:**
+
+```json
+// 401 Unauthorized - Missing or invalid admin token
+{"error": "Unauthorized"}
+```
+
+**curl example:**
+
+```bash
+curl -X PUT http://localhost:3000/api/admin/config \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <admin-token>" \
+  -d '{"rate_limit_per_namespace_per_minute": 5000}'
 ```
 
 ---
@@ -417,27 +678,30 @@ curl -X POST http://localhost:3000/api/state/entities/delete \
 
 Upgrade HTTP connection to WebSocket.
 
+**Auth:** When `auth_enabled = true`, token is required as a query parameter (WebSocket protocol does not support headers during upgrade):
+
+```
+ws://localhost:3000/api/ws?token=<bearer-token>
+```
+
+Invalid or missing token returns HTTP `401` before the upgrade.
+
 **JavaScript example:**
 
 ```javascript
+// Without auth
 const ws = new WebSocket('ws://localhost:3000/api/ws');
 
-ws.onopen = () => {
-  console.log('Connected to Flux');
-};
+// With auth
+const ws = new WebSocket('ws://localhost:3000/api/ws?token=<bearer-token>');
 
+ws.onopen = () => console.log('Connected to Flux');
 ws.onmessage = (event) => {
   const message = JSON.parse(event.data);
   console.log('Received:', message);
 };
-
-ws.onerror = (error) => {
-  console.error('WebSocket error:', error);
-};
-
-ws.onclose = () => {
-  console.log('Disconnected from Flux');
-};
+ws.onerror = (error) => console.error('WebSocket error:', error);
+ws.onclose = () => console.log('Disconnected from Flux');
 ```
 
 **Python example:**
@@ -450,15 +714,10 @@ import json
 async def connect():
     uri = "ws://localhost:3000/api/ws"
     async with websockets.connect(uri) as websocket:
-        print("Connected to Flux")
-
-        # Subscribe
         await websocket.send(json.dumps({
             "type": "subscribe",
             "entity_id": "temp-sensor-01"
         }))
-
-        # Receive updates
         async for message in websocket:
             data = json.loads(message)
             print(f"Received: {data}")
@@ -474,8 +733,6 @@ asyncio.run(connect())
 
 Subscribe to updates for a specific entity.
 
-**Message:**
-
 ```json
 {
   "type": "subscribe",
@@ -483,38 +740,14 @@ Subscribe to updates for a specific entity.
 }
 ```
 
-**Fields:**
-
-- `type` (required) - Must be "subscribe"
-- `entity_id` (required) - Entity ID to subscribe to (use "*" for all entities)
-
-**Effect:**
-
-- Client will receive `state_update` messages when entity properties change
-- Multiple subscriptions allowed (send multiple subscribe messages)
-
-**JavaScript example:**
-
-```javascript
-ws.send(JSON.stringify({
-  type: 'subscribe',
-  entity_id: 'temp-sensor-01'
-}));
-
-// Subscribe to all entities
-ws.send(JSON.stringify({
-  type: 'subscribe',
-  entity_id: '*'
-}));
-```
+- `entity_id`: Use `"*"` to subscribe to all entities.
+- Multiple subscriptions allowed.
 
 ---
 
 #### Client → Server: Unsubscribe
 
 Stop receiving updates for a specific entity.
-
-**Message:**
 
 ```json
 {
@@ -523,32 +756,11 @@ Stop receiving updates for a specific entity.
 }
 ```
 
-**Fields:**
-
-- `type` (required) - Must be "unsubscribe"
-- `entity_id` (required) - Entity ID to unsubscribe from
-
-**Effect:**
-
-- Client stops receiving updates for that entity
-- Other subscriptions unaffected
-
-**JavaScript example:**
-
-```javascript
-ws.send(JSON.stringify({
-  type: 'unsubscribe',
-  entity_id: 'temp-sensor-01'
-}));
-```
-
 ---
 
 #### Server → Client: State Update
 
-State update notification sent when subscribed entity property changes.
-
-**Message:**
+Sent when a subscribed entity property changes.
 
 ```json
 {
@@ -560,32 +772,7 @@ State update notification sent when subscribed entity property changes.
 }
 ```
 
-**Fields:**
-
-- `type` - Always "state_update"
-- `entity_id` - Entity identifier
-- `property` - Property name that changed
-- `value` - New property value
-- `timestamp` - Update timestamp
-
-**When sent:**
-
-- Whenever any property of a subscribed entity changes
-- One message per property update (not batched)
-
-**Note:** Updates are per-property, not full entity state.
-
-**JavaScript handler:**
-
-```javascript
-ws.onmessage = (event) => {
-  const message = JSON.parse(event.data);
-
-  if (message.type === 'state_update') {
-    console.log(`${message.entity_id}.${message.property} = ${message.value}`);
-  }
-};
-```
+One message per property update (not batched).
 
 ---
 
@@ -593,59 +780,22 @@ ws.onmessage = (event) => {
 
 Real-time metrics broadcast (every 2 seconds by default).
 
-**Message:**
-
 ```json
 {
   "type": "metrics_update",
   "timestamp": "2026-02-14T14:30:45.123Z",
-  "entities": {
-    "total": 1543
-  },
-  "events": {
-    "total": 458392,
-    "rate_per_second": 45.2
-  },
-  "websocket": {
-    "connections": 3
-  },
-  "publishers": {
-    "active": 12
-  }
+  "entities": {"total": 1543},
+  "events": {"total": 458392, "rate_per_second": 45.2},
+  "websocket": {"connections": 3},
+  "publishers": {"active": 12}
 }
-```
-
-**Fields:**
-
-- `type` - Always "metrics_update"
-- `timestamp` - Server timestamp
-- `entities.total` - Current entity count
-- `events.total` - Total events processed
-- `events.rate_per_second` - Current event rate (5-second window)
-- `websocket.connections` - Active WebSocket connections
-- `publishers.active` - Active publishers (within configured window)
-
-**JavaScript handler:**
-
-```javascript
-ws.onmessage = (event) => {
-  const message = JSON.parse(event.data);
-
-  if (message.type === 'metrics_update') {
-    console.log(`Entities: ${message.entities.total}`);
-    console.log(`Event rate: ${message.events.rate_per_second} eps`);
-    console.log(`Active publishers: ${message.publishers.active}`);
-  }
-};
 ```
 
 ---
 
 #### Server → Client: Entity Deleted
 
-Notification when an entity is deleted.
-
-**Message:**
+Notification when an entity is deleted (sent to all connected clients).
 
 ```json
 {
@@ -655,30 +805,6 @@ Notification when an entity is deleted.
 }
 ```
 
-**Fields:**
-
-- `type` - Always "entity_deleted"
-- `entity_id` - ID of deleted entity
-- `timestamp` - Deletion timestamp
-
-**When sent:**
-
-- When entity is deleted via DELETE API
-- Sent to all connected WebSocket clients
-
-**JavaScript handler:**
-
-```javascript
-ws.onmessage = (event) => {
-  const message = JSON.parse(event.data);
-
-  if (message.type === 'entity_deleted') {
-    console.log(`Entity ${message.entity_id} was deleted`);
-    // Remove from local cache/UI
-  }
-};
-```
-
 ---
 
 ### Usage Patterns
@@ -686,27 +812,16 @@ ws.onmessage = (event) => {
 #### Pattern 1: Subscribe and Stream
 
 ```javascript
-// Connect and subscribe
 const ws = new WebSocket('ws://localhost:3000/api/ws');
 
 ws.onopen = () => {
-  // Subscribe to multiple entities
-  ws.send(JSON.stringify({
-    type: 'subscribe',
-    entity_id: 'temp-sensor-01'
-  }));
-
-  ws.send(JSON.stringify({
-    type: 'subscribe',
-    entity_id: 'temp-sensor-02'
-  }));
+  ws.send(JSON.stringify({type: 'subscribe', entity_id: 'temp-sensor-01'}));
+  ws.send(JSON.stringify({type: 'subscribe', entity_id: '*'}));
 };
 
 ws.onmessage = (event) => {
   const msg = JSON.parse(event.data);
-  if (msg.type === 'update') {
-    updateUI(msg.entity);
-  }
+  if (msg.type === 'state_update') updateUI(msg);
 };
 ```
 
@@ -720,58 +835,12 @@ renderEntities(entities);
 
 // 2. Subscribe via WebSocket for updates
 const ws = new WebSocket('ws://localhost:3000/api/ws');
-
 ws.onopen = () => {
-  entities.forEach(entity => {
-    ws.send(JSON.stringify({
-      type: 'subscribe',
-      entity_id: entity.id
-    }));
-  });
+  ws.send(JSON.stringify({type: 'subscribe', entity_id: '*'}));
 };
-
 ws.onmessage = (event) => {
   const msg = JSON.parse(event.data);
-  if (msg.type === 'update') {
-    updateEntity(msg.entity);
-  }
-};
-```
-
-#### Pattern 3: Publish and Subscribe
-
-```javascript
-// Subscribe first
-ws.onopen = () => {
-  ws.send(JSON.stringify({
-    type: 'subscribe',
-    entity_id: 'my-entity'
-  }));
-};
-
-// Publish event via HTTP
-async function updateEntity(properties) {
-  await fetch('http://localhost:3000/api/events', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({
-      stream: 'myapp',
-      source: 'client-01',
-      payload: {
-        entity_id: 'my-entity',
-        properties: properties
-      }
-    })
-  });
-
-  // Will receive update via WebSocket automatically
-}
-
-ws.onmessage = (event) => {
-  const msg = JSON.parse(event.data);
-  if (msg.type === 'update') {
-    console.log('State updated:', msg.entity);
-  }
+  if (msg.type === 'state_update') updateEntity(msg);
 };
 ```
 
@@ -779,54 +848,36 @@ ws.onmessage = (event) => {
 
 ## Error Handling
 
-### HTTP API Errors
+### HTTP API Error Codes
 
-**400 Bad Request**
-- Invalid JSON body
-- Missing required fields
-- Invalid field values
-- Malformed event envelope
-
-**404 Not Found**
-- Entity doesn't exist (GET /api/state/entities/:id)
-
-**500 Internal Server Error**
-- NATS connection failure
-- State engine error
-- Unexpected server error
+| Code | Meaning |
+|------|---------|
+| 400 | Bad Request — invalid JSON, missing fields, validation failure |
+| 401 | Unauthorized — missing or invalid bearer token |
+| 403 | Forbidden — token valid but not authorized for this resource |
+| 404 | Not Found — entity, connector, or namespace doesn't exist |
+| 409 | Conflict — namespace name already taken |
+| 413 | Payload Too Large — body exceeds configured size limit |
+| 429 | Too Many Requests — rate limit exceeded (`Retry-After: 60` header included) |
+| 500 | Internal Server Error — NATS failure, state engine error |
 
 **Error response format:**
 
 ```json
-{
-  "error": "Human-readable error message"
-}
+{"error": "Human-readable error message"}
 ```
 
 ### WebSocket Errors
 
-**Connection failures:**
-- Network timeout
-- Server unavailable
-- Invalid WebSocket upgrade
+- **401 before upgrade:** Missing or invalid token (auth enabled)
+- **Invalid JSON message:** Silently ignored by server
+- **Unknown message type:** Silently ignored by server
 
-**Runtime errors:**
-- Invalid JSON message
-- Unknown message type
-- Malformed message structure
-
-**Handling in JavaScript:**
+**Reconnection handling:**
 
 ```javascript
-ws.onerror = (error) => {
-  console.error('WebSocket error:', error);
-  // Implement reconnection logic
-};
-
 ws.onclose = (event) => {
   if (!event.wasClean) {
-    console.error('Connection closed unexpectedly');
-    // Reconnect after delay
     setTimeout(() => reconnect(), 5000);
   }
 };
@@ -836,23 +887,18 @@ ws.onclose = (event) => {
 
 ## Rate Limits
 
-**Phase 1:** No rate limiting implemented.
+**Active only when `auth_enabled = true`.** No limits in internal mode.
 
-**Future phases:**
-- Per-client event ingestion limits
-- Per-client subscription limits
-- Token-based quotas
+- **Per namespace:** 10,000 events/minute (~167 eps) — configurable via admin API
+- **Granularity:** Per namespace (one namespace cannot starve others)
+- **State:** In-memory (resets on restart)
+- **Exceeded:** `429 Too Many Requests` with `Retry-After: 60` header
 
----
+**Body size limits (always enforced):**
 
-## Authentication & Authorization
-
-**Phase 1:** No authentication.
-
-**Future phases:**
-- Token-based authentication (JWT, API keys)
-- Stream-level authorization
-- Role-based access control
+- Single event (`POST /api/events`): 1 MB
+- Batch events (`POST /api/events/batch`): 10 MB
+- Exceeded: `413 Payload Too Large`
 
 ---
 
@@ -863,7 +909,7 @@ ws.onclose = (event) => {
 1. **Include meaningful source:** Identify the producer clearly
 2. **Use consistent stream names:** Namespace by domain (e.g., "sensors.temperature")
 3. **Always include entity_id in payload:** Required for state derivation
-4. **Include all properties:** Properties are replaced, not merged
+4. **Send only changed properties:** Properties are merged per-entity — each event updates only the properties it includes, existing properties are preserved
 5. **Use batch API for multiple events:** Better performance
 
 ### State Subscription
@@ -888,15 +934,3 @@ See `/examples/` directory for complete examples:
 - `python/` - Python client examples
 - `javascript/` - Browser and Node.js examples
 - `bash/` - Shell script examples (curl)
-
----
-
-## Client Libraries
-
-**Phase 1:** No official client libraries. Use HTTP and WebSocket directly.
-
-**Future phases:**
-- Python SDK
-- JavaScript SDK
-- Go SDK
-- Rust SDK

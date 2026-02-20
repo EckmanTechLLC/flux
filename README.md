@@ -21,9 +21,17 @@ Flux ingests immutable events, derives live in-memory state from them, and expos
 
 ```
 Producer → Event Ingestion → NATS (internal) → State Engine → WebSocket API → Consumers
+                                                     ↑
+                                          Connector Manager (polls external APIs)
 ```
 
 Consumers observe Flux's canonical state. They never see raw events.
+
+**Services (Docker Compose):**
+- `nats` — JetStream event backbone (internal transport only)
+- `flux` — State engine + HTTP/WebSocket API
+- `flux-ui` — Web monitoring and management UI
+- `connector-manager` — Polls external APIs (GitHub, etc.), publishes events to Flux
 
 ## Use Cases (Domain-Agnostic)
 
@@ -33,13 +41,13 @@ Flux is infrastructure that works for any domain:
 - **Industrial SCADA:** Real-time equipment state
 - **Virtual worlds/games:** Shared game state, time-travel debugging
 - **IoT platforms:** Device state aggregation
-- **Collaborative systems:** Real-time document/project state
+- **Personal life state:** GitHub, Gmail, Calendar → unified state via connectors
 
 ## Status
 
-**Fresh start:** Building state engine from scratch using flux-reactor patterns.
+**Core engine stable. Connector framework in active development (ADR-005).**
 
-Previous work (event backbone approach) archived in `archive/event-backbone` branch.
+Deployed at `https://flux.eckman-tech.com` with 7 VMs publishing system metrics.
 
 ## Documentation
 
@@ -59,78 +67,90 @@ Previous work (event backbone approach) archived in `archive/event-backbone` bra
 - **State Engine:** Rust (performance, safety, no GC pauses)
 - **Event Transport (Internal):** NATS with JetStream
 - **APIs:** Rust with Axum (WebSocket + HTTP REST)
+- **Connector Manager:** Rust (separate binary, same repo)
 - **Deployment:** Docker Compose
 
 ## Quick Start
 
-### For OpenClaw Users
+**Prerequisites:** Docker and Docker Compose
 
-**Install the skill:**
-```bash
-clawhub install flux
-```
-
-**Using a hosted instance:**
-
-Contact [@EckmanTechLLC](https://github.com/EckmanTechLLC) for access to a test instance, or run your own (see below).
-
----
-
-### Running Your Own Flux
-
-**Prerequisites:**
-- Docker and Docker Compose
-- (Optional) curl for testing
-
-### Running Flux
+**1. Create your `.env` file:**
 
 ```bash
-# Start Flux + NATS
-docker-compose up -d
-
-# Check logs
-docker-compose logs -f flux
-
-# Stop services
-docker-compose down
+cp .env.example .env
+# Edit .env — at minimum set FLUX_ENCRYPTION_KEY (see below)
 ```
 
-Flux will be available at `http://localhost:3000`.
-
-### Configuration
-
-Flux uses `config.toml` for configuration. Default settings work for most cases.
-
-**Snapshot configuration:**
-```toml
-[snapshot]
-enabled = true
-interval_minutes = 5          # Snapshot frequency
-directory = "/var/lib/flux/snapshots"  # Snapshot storage
-keep_count = 10               # Number of snapshots to retain
-```
-
-**NATS configuration:**
-```toml
-[nats]
-url = "nats://localhost:4222"
-stream_name = "FLUX_EVENTS"
-```
-
-**Recovery configuration:**
-```toml
-[recovery]
-auto_recover = true  # Load snapshot on startup
-```
-
-Snapshots enable fast recovery (<10 seconds for 100k entities) and state persistence across restarts.
-
-### Publishing Events
-
-Events auto-generate UUIDs (eventId optional):
+**2. Generate a `FLUX_ENCRYPTION_KEY`:**
 
 ```bash
-# POST event to Flux
+openssl rand -base64 32
+```
+
+Paste the output into `.env` as `FLUX_ENCRYPTION_KEY`. This key encrypts stored OAuth credentials. Required for the connector framework — without it, connectors are disabled but Flux starts normally.
+
+**3. Start all services:**
+
+```bash
+docker compose up -d
+```
+
+**4. Check logs:**
+
+```bash
+docker compose logs -f flux
+docker compose logs -f connector-manager
+```
+
+**5. Stop services:**
+
+```bash
+docker compose down
+```
+
+**Ports:**
+- Flux API: `http://localhost:3000`
+- Flux UI: `http://localhost:8082`
+- NATS (external): `localhost:4223`
+
+> **Note on startup time:** On first start (and after restarts), Flux replays all events from NATS JetStream to rebuild state. This is expected behavior, not a bug. Replay time scales with event history — snapshots are used to reduce replay window.
+
+## Configuration
+
+All configuration is via environment variables (`.env` file for Docker Compose).
+
+### Required
+
+| Variable | Description |
+|---|---|
+| `FLUX_ENCRYPTION_KEY` | Base64-encoded 32 random bytes. Encrypts stored OAuth tokens. Generate with `openssl rand -base64 32`. |
+
+### Connector OAuth (required per connector)
+
+| Variable | Description |
+|---|---|
+| `FLUX_OAUTH_GITHUB_CLIENT_ID` | GitHub OAuth App client ID |
+| `FLUX_OAUTH_GITHUB_CLIENT_SECRET` | GitHub OAuth App client secret |
+| `FLUX_OAUTH_CALLBACK_BASE_URL` | Public base URL for OAuth callbacks (e.g. `https://flux.example.com`) |
+
+### Optional
+
+| Variable | Default | Description |
+|---|---|---|
+| `FLUX_CREDENTIALS_DB` | `/data/credentials.db` | Path to encrypted credentials SQLite database |
+| `FLUX_ADMIN_TOKEN` | _(none)_ | Token for admin API access (`PUT /api/admin/config`). If unset, admin writes are disabled. |
+| `FLUX_AUTH_ENABLED` | `false` | Enable namespace token auth for writes. Internal deployments leave this false. |
+| `PORT` | `3000` | Flux API port |
+
+### NATS
+
+NATS runs as an internal Docker service. The connector-manager and flux containers connect to it via `nats://nats:4222` (Docker internal network). External access (e.g. for debugging) is available at `localhost:4223`.
+
+Do not expose port 4222 externally — NATS has no auth in this configuration.
+
+## Publishing Events
+
+```bash
 curl -X POST http://localhost:3000/api/events \
   -H "Content-Type: application/json" \
   -d '{
@@ -146,9 +166,9 @@ curl -X POST http://localhost:3000/api/events \
   }'
 ```
 
-**Note:** `eventId` is auto-generated if omitted. `payload` must include `entity_id` and `properties` for state derivation.
+`eventId` is auto-generated if omitted. `payload` must include `entity_id` and `properties` for state derivation.
 
-### Querying State
+## Querying State
 
 ```bash
 # Get all entities
@@ -156,19 +176,18 @@ curl http://localhost:3000/api/state/entities
 
 # Get specific entity
 curl http://localhost:3000/api/state/entities/temp-sensor-01
+
+# Filter by namespace
+curl http://localhost:3000/api/state/entities?namespace=matt
 ```
 
-### WebSocket Subscription
+## WebSocket Subscription
 
 ```javascript
 const ws = new WebSocket('ws://localhost:3000/api/ws');
 
 ws.onopen = () => {
-  // Subscribe to entity updates
-  ws.send(JSON.stringify({
-    type: 'subscribe',
-    entityId: 'temp-sensor-01'
-  }));
+  ws.send(JSON.stringify({ type: 'subscribe', entity_id: 'temp-sensor-01' }));
 };
 
 ws.onmessage = (event) => {
@@ -177,32 +196,28 @@ ws.onmessage = (event) => {
 };
 ```
 
+When `FLUX_AUTH_ENABLED=true`, pass token as query param: `ws://host/api/ws?token=<token>`
+
 ## Authentication & Multi-tenancy
 
-Flux supports two deployment modes:
-
-**Internal Mode (default):**
+**Internal mode (default, `FLUX_AUTH_ENABLED=false`):**
 - No authentication required
 - Simple entity IDs (`sensor-01`)
 - For trusted environments (VPN, internal network)
 
-**Public Mode:**
-- Token-based write authorization
+**Public mode (`FLUX_AUTH_ENABLED=true`):**
+- Token-based write authorization per namespace
 - Namespaced entity IDs (`matt/sensor-01`)
-- Open reading (anyone can query/subscribe)
+- Reads remain open (anyone can query/subscribe)
 
-### Enabling Authentication
+### Enabling Auth
 
-Set `FLUX_AUTH_ENABLED=true` in environment or `config.toml`:
-
-```toml
-[auth]
-enabled = true
+```bash
+FLUX_AUTH_ENABLED=true  # in .env
 ```
 
-### Using a Public Instance
+### Register a Namespace
 
-**1. Register a namespace:**
 ```bash
 curl -X POST http://localhost:3000/api/namespaces \
   -H "Content-Type: application/json" \
@@ -211,81 +226,79 @@ curl -X POST http://localhost:3000/api/namespaces \
 # Response: {"namespace_id": "ns_7x9f2a", "name": "matt", "token": "550e8400-..."}
 ```
 
-**2. Publish events with your token:**
+Use the returned token as `Authorization: Bearer <token>` on write requests.
+
+## Admin Config API
+
+Runtime limits are configurable without restart via the admin API.
+
 ```bash
-curl -X POST http://localhost:3000/api/events \
+# Read current config (any authenticated user when auth enabled, open otherwise)
+curl http://localhost:3000/api/admin/config
+
+# Update limits (requires FLUX_ADMIN_TOKEN)
+curl -X PUT http://localhost:3000/api/admin/config \
+  -H "Authorization: Bearer <admin-token>" \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer 550e8400-..." \
   -d '{
-    "stream": "sensors",
-    "source": "sensor-01",
-    "payload": {
-      "entity_id": "matt/sensor-01",
-      "properties": {"temperature": 22.5}
-    }
+    "rate_limit_enabled": true,
+    "rate_limit_per_namespace_per_minute": 10000,
+    "body_size_limit_single_bytes": 1048576,
+    "body_size_limit_batch_bytes": 10485760
   }'
 ```
 
-**3. Query entities (no auth required):**
+## Connectors
+
+Flux can pull data from external APIs via the Connector Framework (ADR-005). Connectors are managed through the UI or API.
+
+**GitHub connector (available now):** Syncs repos, issues, PRs, and notifications as Flux entities.
+
+**Setup via UI:**
+1. Open `http://localhost:8082`
+2. Navigate to **Connectors** panel
+3. Click **Connect GitHub**
+4. Complete OAuth flow
+
+**API:**
 ```bash
-# All entities
-curl http://localhost:3000/api/state/entities
+# List connectors and status
+curl http://localhost:3000/api/connectors
 
-# Filter by namespace
-curl http://localhost:3000/api/state/entities?namespace=matt
+# Start OAuth flow
+curl http://localhost:3000/api/connectors/github/oauth/start
 
-# Filter by prefix
-curl http://localhost:3000/api/state/entities?prefix=matt/sensor
+# Get connector status
+curl http://localhost:3000/api/connectors/github
 ```
 
-**Note:** Tokens control writes only. Reading is always open for observation and coordination.
+**GitHub OAuth setup:** Create an OAuth App at [github.com/settings/developers](https://github.com/settings/developers). Set the callback URL to `<FLUX_OAUTH_CALLBACK_BASE_URL>/api/connectors/github/oauth/callback`.
 
 ## Web UI
 
-Flux includes a real-time web UI for monitoring and management.
+Flux UI runs as a Docker container (included in `docker-compose.yml`).
 
-**Start UI:**
 ```bash
-cd ui
-node server.js
+docker compose up -d flux-ui
 ```
 
-**Access:**
-- Local: `http://localhost:8082`
-- Remote: `http://<your-server-ip>:8082`
+Access at `http://localhost:8082`.
 
 **Features:**
 - Real-time metrics (EPS, entity count, active publishers)
 - Live entity viewer with grouping and filtering
-- Load testing controls
-- Dark theme optimized for monitoring
-
-**Configuration:**
-```bash
-# Custom port
-UI_PORT=9000 node server.js
-
-# Connect to different Flux instance
-FLUX_API=http://other-host:3000 FLUX_WS=ws://other-host:3000/api/ws node server.js
-```
+- Connector management (OAuth setup, enable/disable, status)
+- Admin config panel
 
 ## Integrations
 
 ### OpenClaw Skill
 
-Flux includes an [OpenClaw](https://openclaw.ai) skill for agent integration:
-
-**Installation:**
 ```bash
-# Copy skill to OpenClaw workspace
-cp -r examples/openclaw-skill ~/.openclaw/workspace/skills/flux-interact
+clawhub install flux
 ```
 
-**Usage:**
-OpenClaw agents can naturally interact with Flux:
-- "Test Flux connection and show entities"
-- "Publish observation: temperature is 22.5 celsius in room-101"
-- "Check Flux for the current state of sensor-01"
+Agents can interact naturally: "Check Flux for the current state of sensor-01", "Publish observation: temperature is 22.5 in room-101".
 
 See `/examples/openclaw-skill/` for full documentation.
 
@@ -294,22 +307,35 @@ See `/examples/openclaw-skill/` for full documentation.
 ## API Summary
 
 **Event Ingestion:**
-- `POST /api/events` - Publish single event
-- `POST /api/events/batch` - Publish multiple events
+- `POST /api/events` — Publish single event
+- `POST /api/events/batch` — Publish multiple events
 
 **State Query:**
-- `GET /api/state/entities` - List all entities
-- `GET /api/state/entities/:id` - Get specific entity
+- `GET /api/state/entities` — List all entities (filterable by namespace, prefix)
+- `GET /api/state/entities/:id` — Get specific entity
 
 **Entity Management:**
-- `DELETE /api/state/entities/:id` - Delete single entity
-- `POST /api/state/entities/delete` - Batch delete (by namespace/prefix/IDs)
+- `DELETE /api/state/entities/:id` — Delete single entity
+- `POST /api/state/entities/delete` — Batch delete (by namespace/prefix/IDs)
 
 **Real-time Updates:**
-- `GET /api/ws` - WebSocket subscription (state updates, metrics, deletions)
+- `GET /api/ws` — WebSocket subscription (state updates, metrics, deletions)
 
-For detailed API documentation with examples, see [API Reference](docs/api.md).
+**Namespaces:**
+- `POST /api/namespaces` — Register namespace (returns auth token)
+
+**Connectors:**
+- `GET /api/connectors` — List connectors and status
+- `GET /api/connectors/:name` — Connector status
+- `GET /api/connectors/:name/oauth/start` — Begin OAuth flow
+- `GET /api/connectors/:name/oauth/callback` — OAuth callback (set as redirect URI in provider)
+
+**Admin:**
+- `GET /api/admin/config` — Read runtime config
+- `PUT /api/admin/config` — Update runtime config (requires `FLUX_ADMIN_TOKEN`)
+
+For detailed API documentation, see [API Reference](docs/api.md).
 
 ## License
 
-MIT License - see [LICENSE](LICENSE) file for details.
+MIT License — see [LICENSE](LICENSE) file for details.

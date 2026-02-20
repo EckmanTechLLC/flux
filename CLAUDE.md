@@ -1,6 +1,6 @@
 # Flux Context for Claude
 
-**Last Updated:** 2026-02-19
+**Last Updated:** 2026-02-20
 **Status:** Active development — Connector Framework (ADR-005)
 
 ---
@@ -93,21 +93,20 @@ These were in early design docs but deemed unnecessary (2026-02-14):
 **Deployment Status:**
 - Private test instance on etl-bot (Cloudflare tunnel + systemd, contact for access)
 - Public endpoint: https://flux.eckman-tech.com
-- UI running at http://192.168.50.106:8080
+- UI running at http://localhost:8082
 - 7 VMs publishing system metrics
 - OpenClaw skill published to ClawHub registry (flux@1.0.0)
 - Arc agent coordinating through Flux on etl-bot
 
-**Infrastructure Ports:**
-- NATS (internal): 4222
+**Infrastructure Ports (dev docker-compose):**
+- NATS client: 4223 (external) / 4222 (internal Docker network)
 - NATS monitoring: 8223
-- Flux WebSocket API: 3000
-- Flux HTTP API: 3000
+- Flux API (HTTP + WebSocket): 3000
 - Flux UI: 8082
 
 **Tests:** 142 Flux core + 22 connector-manager + 3 doc tests
 
-### Phase 5: Connector Framework (IN PROGRESS 🔧 2026-02-19)
+### ADR-005: Connector Framework (IN PROGRESS 🔧 2026-02-20)
 - [x] ADR-005: Connector Framework
 - [x] Phase 1: Framework infrastructure (connector interface, credential storage, OAuth flow, manager core, status API, UI panel)
 - [x] Phase 2 partial: GitHub connector (OAuth config, API client, transformer, implementation)

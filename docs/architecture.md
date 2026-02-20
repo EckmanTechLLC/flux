@@ -1,7 +1,7 @@
 # Flux Architecture
 
 **Status:** Complete
-**Last Updated:** 2026-02-14
+**Last Updated:** 2026-02-20
 
 ---
 
@@ -365,7 +365,7 @@ For each event:
      - Broadcast StateUpdate(entity_id, key, old, new, timestamp)
 ```
 
-**Phase 1 limitation:** No snapshot persistence. State rebuilt from events on restart.
+**Persistence:** Snapshot-based (see Persistence & Recovery section).
 
 ---
 
@@ -391,7 +391,7 @@ For each event:
 **Message flow:**
 
 ```
-Client → Server: {"type": "subscribe", "entityId": "sensor-01"}
+Client → Server: {"type": "subscribe", "entity_id": "sensor-01"}
 Server → Client: {"type": "update", "entity": {...}}
 Server → Client: {"type": "update", "entity": {...}}
 ```
@@ -490,7 +490,7 @@ Server → Client: {"type": "update", "entity": {...}}
 1. Client connects: WebSocket to ws://localhost:3000/api/ws
 
 2. Client subscribes:
-   → {"type": "subscribe", "entityId": "sensor-01"}
+   → {"type": "subscribe", "entity_id": "sensor-01"}
 
 3. Server acknowledges subscription
 
@@ -500,7 +500,7 @@ Server → Client: {"type": "update", "entity": {...}}
 5. Client processes update locally
 
 6. To unsubscribe:
-   → {"type": "unsubscribe", "entityId": "sensor-01"}
+   → {"type": "unsubscribe", "entity_id": "sensor-01"}
 ```
 
 ### Querying State
@@ -614,34 +614,41 @@ Server → Client: {"type": "update", "entity": {...}}
 
 **Future improvements:**
 - Sharding for horizontal scale
-- Snapshot persistence for fast recovery
 - Read replicas for query scaling
 
 ---
 
 ## Deployment Architecture
 
-**Phase 1 (Docker Compose):**
+**Docker Compose (current):**
 
 ```
-┌─────────────────────────────────────────┐
-│  Host Machine (localhost)               │
-│                                         │
-│  ┌──────────────┐  ┌─────────────────┐ │
-│  │   Flux       │  │   NATS          │ │
-│  │              │  │                 │ │
-│  │   Port 3000  │  │   Port 4222     │ │
-│  │   (HTTP/WS)  │  │   (internal)    │ │
-│  │              │  │                 │ │
-│  │              │  │   Port 8223     │ │
-│  │              │  │   (monitoring)  │ │
-│  └──────┬───────┘  └────────┬────────┘ │
-│         │                   │          │
-│         └───────────────────┘          │
-│              (internal network)        │
-└─────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────┐
+│  Host Machine (localhost)                            │
+│                                                      │
+│  ┌──────────────┐  ┌─────────────────┐              │
+│  │   Flux       │  │   NATS          │              │
+│  │              │  │                 │              │
+│  │   Port 3000  │  │   Port 4223     │ ←ext         │
+│  │   (HTTP/WS)  │  │   (4222 int)   │              │
+│  │              │  │                 │              │
+│  │              │  │   Port 8223     │              │
+│  │              │  │   (monitoring)  │              │
+│  └──────┬───────┘  └────────┬────────┘              │
+│         │                   │                        │
+│         └───────────────────┘                        │
+│              (flux-network)                          │
+│                                                      │
+│  ┌──────────────────────┐  ┌──────────────────────┐ │
+│  │   Flux UI            │  │   Connector Manager  │ │
+│  │                      │  │                      │ │
+│  │   Port 8082          │  │   (no external port) │ │
+│  │   (web interface)    │  │   (internal only)    │ │
+│  └──────────────────────┘  └──────────────────────┘ │
+└──────────────────────────────────────────────────────┘
 
-Clients connect to: localhost:3000
+Clients connect to: localhost:3000 (API), localhost:8082 (UI)
+NATS external port 4223 maps to internal 4222 (avoids conflict with flux-reactor)
 ```
 
 **Future deployment (Kubernetes):**
@@ -649,6 +656,104 @@ Clients connect to: localhost:3000
 - Deployment for NATS (separate service)
 - Ingress for external access
 - Horizontal pod autoscaling
+
+---
+
+## Connector Framework
+
+**Status:** In progress (ADR-005)
+
+Connectors pull data from external APIs and publish to Flux as events. They are separate services — Flux core is unchanged.
+
+### Architecture
+
+```
+External API (GitHub, Gmail, etc.)
+         ↓
+    OAuth / PAT
+         ↓
+┌─────────────────────────────────┐
+│  Connector Manager              │
+│  - Schedule polling             │
+│  - Decrypt credentials          │
+│  - Call connector.fetch()       │
+│  - Publish events to Flux       │
+└─────────────────────────────────┘
+         ↓ HTTP POST /api/events
+┌─────────────────────────────────┐
+│  Flux Core (unchanged)          │
+│  - Ingest, derive state, serve  │
+└─────────────────────────────────┘
+```
+
+### Credential Storage
+
+- **Backend:** SQLite file (`FLUX_CREDENTIALS_DB`)
+- **Encryption:** AES-256-GCM, key from `FLUX_ENCRYPTION_KEY` (never stored on disk)
+- **Per user/connector:** One row per namespace + connector name
+- **Access:** Credentials are decrypted by connector manager only; never exposed via API
+
+### Available Connectors
+
+| Connector | Poll Interval | Status |
+|-----------|--------------|--------|
+| github | 5 min | Framework ready, connector implemented |
+| gmail | 1 min | Framework ready, connector planned |
+| linkedin | 10 min | Framework ready, connector planned |
+| calendar | 5 min | Framework ready, connector planned |
+
+### Connector API
+
+See `/docs/api.md` — Connector Management section for:
+- `GET /api/connectors` — list status
+- `GET /api/connectors/:name` — single connector status
+- `POST /api/connectors/:name/token` — store PAT
+- `DELETE /api/connectors/:name/token` — remove credentials
+
+OAuth flows managed through `/api/connectors/:name/oauth/start` and `/api/connectors/:name/oauth/callback`.
+
+---
+
+## Security Hardening
+
+**Status:** Implemented (ADR-006)
+
+All security controls are **auth-gated** — active only when `auth_enabled = true`. Internal deployments (`auth_enabled = false`) are unaffected.
+
+### Runtime Config Store
+
+All limits are stored in `RuntimeConfig` backed by `Arc<RwLock<...>>`. Changes via `PUT /api/admin/config` take effect immediately — no restart required.
+
+### Body Size Limits
+
+Enforced at the Axum layer before JSON deserialization:
+
+- Single event (`POST /api/events`): **1 MB**
+- Batch events (`POST /api/events/batch`): **10 MB**
+- Response on exceeded limit: `413 Payload Too Large`
+
+### Rate Limiting
+
+- **Granularity:** Per namespace (one namespace cannot starve others)
+- **Default:** 10,000 events/minute per namespace (~167 eps)
+- **Implementation:** Token bucket per namespace (`DashMap<String, TokenBucket>`)
+- **Hot path overhead:** Single DashMap lookup + atomic decrement — negligible
+- **State:** In-memory only (resets on restart)
+- **Response:** `429 Too Many Requests` with `Retry-After: 60`
+
+### WebSocket Auth
+
+When `auth_enabled = true`, WebSocket upgrade requires a bearer token via query parameter:
+
+```
+ws://host/api/ws?token=<bearer-token>
+```
+
+Invalid/missing token returns HTTP `401` before the WebSocket upgrade.
+
+### Admin API
+
+`PUT /api/admin/config` requires `Authorization: Bearer <admin-token>` where the admin token is set via `FLUX_ADMIN_TOKEN`. `GET /api/admin/config` is readable by any authenticated user.
 
 ---
 
