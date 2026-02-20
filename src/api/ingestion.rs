@@ -1,8 +1,12 @@
 use crate::api::auth_middleware::{authorize_event, AuthError};
+use crate::config::SharedRuntimeConfig;
+use crate::entity::parse_entity_id;
 use crate::event::FluxEvent;
 use crate::namespace::NamespaceRegistry;
 use crate::nats::EventPublisher;
+use crate::rate_limit::RateLimiter;
 use axum::{
+    body::Bytes,
     extract::State,
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Json, Response},
@@ -19,6 +23,8 @@ pub struct AppState {
     pub event_publisher: EventPublisher,
     pub namespace_registry: Arc<NamespaceRegistry>,
     pub auth_enabled: bool,
+    pub runtime_config: SharedRuntimeConfig,
+    pub rate_limiter: Arc<RateLimiter>,
 }
 
 /// Success response for event ingestion
@@ -69,8 +75,18 @@ pub fn create_router(state: AppState) -> Router {
 async fn publish_event(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Json(mut event): Json<FluxEvent>,
+    body: Bytes,
 ) -> Result<Json<EventResponse>, AppError> {
+    // Check body size against runtime-configurable limit
+    let limit = state.runtime_config.read().unwrap().body_size_limit_single_bytes;
+    if body.len() > limit {
+        return Err(AppError::PayloadTooLarge);
+    }
+
+    // Deserialize from checked bytes
+    let mut event: FluxEvent = serde_json::from_slice(&body)
+        .map_err(|e| AppError::ValidationError(e.to_string()))?;
+
     // Validate and prepare event (generates UUIDv7 if needed)
     event
         .validate_and_prepare()
@@ -83,6 +99,19 @@ async fn publish_event(
         &state.namespace_registry,
         state.auth_enabled,
     )?;
+
+    // Rate limit check (auth-gated: only active when auth is enabled)
+    if state.auth_enabled {
+        let namespace = extract_namespace_from_event(&event);
+        let limit = state
+            .runtime_config
+            .read()
+            .unwrap()
+            .rate_limit_per_namespace_per_minute;
+        if !state.rate_limiter.check_and_consume(&namespace, limit) {
+            return Err(AppError::RateLimited);
+        }
+    }
 
     info!(
         event_id = %event.event_id.as_ref().unwrap(),
@@ -111,8 +140,18 @@ async fn publish_event(
 async fn publish_batch(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Json(mut request): Json<BatchRequest>,
+    body: Bytes,
 ) -> Result<Json<BatchResponse>, AppError> {
+    // Check body size against runtime-configurable limit
+    let limit = state.runtime_config.read().unwrap().body_size_limit_batch_bytes;
+    if body.len() > limit {
+        return Err(AppError::PayloadTooLarge);
+    }
+
+    // Deserialize from checked bytes
+    let mut request: BatchRequest = serde_json::from_slice(&body)
+        .map_err(|e| AppError::ValidationError(e.to_string()))?;
+
     if request.events.is_empty() {
         return Err(AppError::ValidationError(
             "Batch request must contain at least one event".to_string(),
@@ -153,6 +192,25 @@ async fn publish_batch(
             continue;
         }
 
+        // Rate limit check (auth-gated)
+        if state.auth_enabled {
+            let namespace = extract_namespace_from_event(event);
+            let limit = state
+                .runtime_config
+                .read()
+                .unwrap()
+                .rate_limit_per_namespace_per_minute;
+            if !state.rate_limiter.check_and_consume(&namespace, limit) {
+                failed += 1;
+                results.push(BatchResult {
+                    event_id: event.event_id.clone(),
+                    stream: Some(event.stream.clone()),
+                    error: Some("rate limit exceeded".to_string()),
+                });
+                continue;
+            }
+        }
+
         // Publish to NATS
         match state.event_publisher.publish(event).await {
             Ok(_) => {
@@ -188,22 +246,41 @@ enum AppError {
     PublishError(String),
     Unauthorized(String),
     Forbidden(String),
+    PayloadTooLarge,
+    RateLimited,
 }
 
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
-        let (status, error_message) = match self {
-            AppError::ValidationError(msg) => (StatusCode::BAD_REQUEST, msg),
-            AppError::PublishError(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg),
-            AppError::Unauthorized(msg) => (StatusCode::UNAUTHORIZED, msg),
-            AppError::Forbidden(msg) => (StatusCode::FORBIDDEN, msg),
-        };
-
-        let body = Json(ErrorResponse {
-            error: error_message,
-        });
-
-        (status, body).into_response()
+        match self {
+            AppError::RateLimited => {
+                let body = Json(ErrorResponse {
+                    error: "rate limit exceeded".to_string(),
+                });
+                let mut resp = (StatusCode::TOO_MANY_REQUESTS, body).into_response();
+                resp.headers_mut().insert(
+                    axum::http::header::RETRY_AFTER,
+                    axum::http::HeaderValue::from_static("60"),
+                );
+                resp
+            }
+            other => {
+                let (status, error_message) = match other {
+                    AppError::ValidationError(msg) => (StatusCode::BAD_REQUEST, msg),
+                    AppError::PublishError(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg),
+                    AppError::Unauthorized(msg) => (StatusCode::UNAUTHORIZED, msg),
+                    AppError::Forbidden(msg) => (StatusCode::FORBIDDEN, msg),
+                    AppError::PayloadTooLarge => {
+                        (StatusCode::PAYLOAD_TOO_LARGE, "payload too large".to_string())
+                    }
+                    AppError::RateLimited => unreachable!(),
+                };
+                let body = Json(ErrorResponse {
+                    error: error_message,
+                });
+                (status, body).into_response()
+            }
+        }
     }
 }
 
@@ -216,4 +293,18 @@ impl From<AuthError> for AppError {
             AuthError::Forbidden(msg) => AppError::Forbidden(msg),
         }
     }
+}
+
+/// Extract namespace from event payload's entity_id, falling back to stream name.
+///
+/// Used for rate-limit bucket keying. If entity_id is missing or has no namespace
+/// prefix, we fall back to the stream field so rate limiting still applies.
+fn extract_namespace_from_event(event: &FluxEvent) -> String {
+    event
+        .payload
+        .get("entity_id")
+        .and_then(|v| v.as_str())
+        .and_then(|eid| parse_entity_id(eid).ok())
+        .and_then(|parsed| parsed.namespace)
+        .unwrap_or_else(|| event.stream.clone())
 }

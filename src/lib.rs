@@ -4,6 +4,9 @@ pub mod config;
 // Event model and validation
 pub mod event;
 
+// Re-export FluxEvent for external crates
+pub use event::FluxEvent;
+
 // State engine and entity management
 pub mod state;
 
@@ -27,3 +30,9 @@ pub mod auth;
 
 // Entity ID parsing
 pub mod entity;
+
+// Connector credential storage
+pub mod credentials;
+
+// Rate limiting (ADR-006)
+pub mod rate_limit;

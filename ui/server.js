@@ -106,7 +106,7 @@ const server = http.createServer(async (req, res) => {
   if (req.url.startsWith('/api/')) {
     try {
       let body = '';
-      if (req.method === 'POST') {
+      if (['POST', 'PUT', 'PATCH'].includes(req.method)) {
         body = await new Promise((resolve, reject) => {
           let chunks = '';
           req.on('data', c => chunks += c);
@@ -118,10 +118,18 @@ const server = http.createServer(async (req, res) => {
         method: req.method,
         headers: { 'Content-Type': 'application/json' }
       };
+      if (req.headers['authorization']) {
+        opts.headers['Authorization'] = req.headers['authorization'];
+      }
       if (body) opts.body = body;
-      const resp = await fetch(`${FLUX_API}${req.url}`, opts);
+      const resp = await fetch(`${FLUX_API}${req.url}`, { ...opts, redirect: 'manual' });
+      if (resp.status >= 300 && resp.status < 400) {
+        res.writeHead(resp.status, { 'Location': resp.headers.get('location') });
+        res.end();
+        return;
+      }
       const data = await resp.text();
-      res.writeHead(resp.status, { 
+      res.writeHead(resp.status, {
         'Content-Type': 'application/json',
         'Access-Control-Allow-Origin': '*'
       });

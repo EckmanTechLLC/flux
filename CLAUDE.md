@@ -1,7 +1,7 @@
 # Flux Context for Claude
 
-**Last Updated:** 2026-02-14
-**Status:** PROJECT COMPLETE ✅
+**Last Updated:** 2026-02-19
+**Status:** Active development — Connector Framework (ADR-005)
 
 ---
 
@@ -31,9 +31,9 @@
 
 ## Current Status
 
-**PROJECT COMPLETE ✅ 2026-02-14**
+**Core engine complete ✅ 2026-02-14 — Connector Framework in progress 🔧**
 
-Flux is feature-complete and deployed. All planned functionality implemented and working.
+Core Flux deployed and stable. Active work on ADR-005 (Connector Framework).
 
 ### Phase 1: State Engine MVP (COMPLETE ✅ 2026-02-11)
 - [x] Git repository initialized
@@ -105,7 +105,15 @@ These were in early design docs but deemed unnecessary (2026-02-14):
 - Flux HTTP API: 3000
 - Flux UI: 8082
 
-**All tests passing:** 142 tests ✅
+**Tests:** 142 Flux core + 22 connector-manager + 3 doc tests
+
+### Phase 5: Connector Framework (IN PROGRESS 🔧 2026-02-19)
+- [x] ADR-005: Connector Framework
+- [x] Phase 1: Framework infrastructure (connector interface, credential storage, OAuth flow, manager core, status API, UI panel)
+- [x] Phase 2 partial: GitHub connector (OAuth config, API client, transformer, implementation)
+- [ ] Phase 2 Task 5: End-to-end test (`tests/integration/github_connector_test.rs`)
+- [ ] Phase 3: Gmail, LinkedIn, Calendar connectors
+- [ ] Phase 4: Community SDK + Marketplace
 
 ---
 

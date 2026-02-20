@@ -343,14 +343,14 @@
   }
 
   .entity-name {
-    font-size: 13px;
+    font-size: 12px;
     font-weight: 600;
     color: var(--text);
     font-family: 'JetBrains Mono', monospace;
   }
 
   .entity-status {
-    font-size: 10px;
+    font-size: 9px;
     padding: 2px 8px;
     border-radius: 10px;
     font-weight: 500;
@@ -372,7 +372,7 @@
   }
 
   .entity-time {
-    font-size: 10px;
+    font-size: 9px;
     color: var(--text-dim);
   }
 
@@ -392,7 +392,7 @@
   .prop-row {
     display: flex;
     justify-content: space-between;
-    font-size: 11px;
+    font-size: 10px;
     align-items: center;
   }
 
@@ -401,7 +401,7 @@
     color: var(--text); 
     font-family: 'JetBrains Mono', monospace;
     text-align: right;
-    font-size: 11px;
+    font-size: 10px;
     word-break: break-word;
     white-space: pre-wrap;
     max-width: 250px;
@@ -484,30 +484,119 @@
   .event-value { color: var(--green); }
   .event-time { color: var(--text-dim); font-size: 10px; float: right; }
 
-  /* Load Test Panel */
-  .loadtest-toggle {
-    position: fixed;
-    bottom: 16px;
-    right: 16px;
+  /* Connectors / Config toggle buttons */
+  .connectors-toggle {
     background: var(--bg3);
     border: 1px solid var(--border);
     border-radius: 8px;
-    padding: 8px 14px;
+    padding: 6px 12px;
     color: var(--text-dim);
     font-size: 12px;
     cursor: pointer;
-    z-index: 100;
     transition: all 0.2s;
+    white-space: nowrap;
   }
 
-  .loadtest-toggle:hover {
+  .connectors-toggle:hover {
     border-color: var(--accent);
     color: var(--text);
   }
 
-  .loadtest-panel {
+  .connectors-panel {
     position: fixed;
-    bottom: 52px;
+    top: 64px;
+    right: 16px;
+    width: 300px;
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px;
+    z-index: 100;
+    display: none;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+  }
+
+  .connectors-panel.visible { display: block; }
+
+  .connectors-panel h3 {
+    font-size: 14px;
+    font-weight: 600;
+    margin-bottom: 12px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .connector-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 13px;
+  }
+
+  .connector-row:last-child { border-bottom: none; }
+
+  .connector-info {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .connector-icon { font-size: 16px; }
+
+  .connector-name {
+    font-weight: 500;
+    color: var(--text);
+  }
+
+  .connector-badge {
+    font-size: 10px;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-weight: 500;
+  }
+
+  .connector-badge.connected {
+    background: rgba(0, 210, 160, 0.12);
+    color: var(--green);
+  }
+
+  .connector-badge.not-connected {
+    background: rgba(106, 106, 128, 0.15);
+    color: var(--text-dim);
+  }
+
+  .connector-action a {
+    font-size: 12px;
+    color: var(--accent2);
+    text-decoration: none;
+    padding: 4px 10px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    transition: all 0.2s;
+  }
+
+  .connector-action a:hover {
+    border-color: var(--accent2);
+    background: rgba(168, 85, 247, 0.08);
+  }
+
+  .connector-action a.disconnect {
+    color: var(--text-dim);
+  }
+
+  .connector-action a.disconnect:hover {
+    border-color: var(--red);
+    color: var(--red);
+    background: rgba(255, 107, 107, 0.08);
+  }
+
+  /* Config Panel */
+  .config-panel {
+    position: fixed;
+    top: 64px;
     right: 16px;
     width: 320px;
     background: var(--bg2);
@@ -519,9 +608,9 @@
     box-shadow: 0 8px 32px rgba(0,0,0,0.5);
   }
 
-  .loadtest-panel.visible { display: block; }
+  .config-panel.visible { display: block; }
 
-  .loadtest-panel h3 {
+  .config-panel h3 {
     font-size: 14px;
     font-weight: 600;
     margin-bottom: 12px;
@@ -530,59 +619,68 @@
     gap: 6px;
   }
 
-  .lt-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-bottom: 10px;
-    font-size: 12px;
-  }
+  .config-field { margin-bottom: 12px; }
 
-  .lt-row label { color: var(--text-dim); }
-
-  .lt-row input[type="range"] {
-    width: 120px;
-    accent-color: var(--accent);
-  }
-
-  .lt-row .lt-val {
-    font-family: 'JetBrains Mono', monospace;
-    color: var(--text);
-    min-width: 40px;
-    text-align: right;
-    font-size: 12px;
-  }
-
-  .lt-stats {
+  .config-label {
     font-size: 11px;
     color: var(--text-dim);
-    margin-top: 8px;
-    padding-top: 8px;
-    border-top: 1px solid var(--border);
-    display: flex;
-    flex-direction: column;
-    gap: 3px;
+    margin-bottom: 4px;
+    display: block;
   }
 
-  .lt-stats span { color: var(--text); font-family: 'JetBrains Mono', monospace; }
-
-  .lt-btn {
+  .config-input {
     width: 100%;
-    padding: 10px;
-    border: 1px solid var(--border);
-    border-radius: 8px;
     background: var(--bg3);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 5px 8px;
     color: var(--text);
-    font-size: 13px;
-    font-weight: 600;
-    cursor: pointer;
-    margin-top: 10px;
-    transition: all 0.2s;
+    font-size: 12px;
+    font-family: 'JetBrains Mono', monospace;
+    outline: none;
   }
 
-  .lt-btn:hover { border-color: var(--accent); }
-  .lt-btn.running { background: rgba(255, 107, 107, 0.15); border-color: var(--red); color: var(--red); }
-  .lt-btn.running:hover { background: rgba(255, 107, 107, 0.25); }
+  .config-input:focus { border-color: var(--accent); }
+
+  .config-checkbox-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    cursor: pointer;
+  }
+
+  .config-divider {
+    border: none;
+    border-top: 1px solid var(--border);
+    margin: 12px 0;
+  }
+
+  .config-save-btn {
+    width: 100%;
+    padding: 7px;
+    background: var(--accent);
+    border: none;
+    border-radius: 6px;
+    color: white;
+    font-size: 12px;
+    cursor: pointer;
+    font-weight: 500;
+    margin-top: 4px;
+    transition: background 0.2s;
+  }
+
+  .config-save-btn:hover { background: var(--accent2); }
+
+  .config-feedback {
+    font-size: 11px;
+    margin-top: 8px;
+    text-align: center;
+    display: none;
+  }
+
+  .config-feedback.ok { color: var(--green); display: block; }
+  .config-feedback.err { color: var(--red); display: block; }
 
   /* Responsive */
   @media (max-width: 900px) {
@@ -609,6 +707,8 @@
   <div class="status">
     <div class="status-dot" id="wsStatus"></div>
     <span id="wsLabel">Connecting…</span>
+    <button class="connectors-toggle" onclick="toggleConnectors()">🔌 Connectors</button>
+    <button class="connectors-toggle" onclick="toggleConfig()">⚙ Config</button>
   </div>
 </div>
 
@@ -708,45 +808,40 @@
   </div>
 </div>
 
-<button class="loadtest-toggle" onclick="toggleLoadTest()">🔥 Load Test</button>
+<div class="connectors-panel" id="connectorsPanel">
+  <h3>🔌 Connected Services</h3>
+  <div id="connectorsList">
+    <div style="font-size:12px;color:var(--text-dim);text-align:center;padding:12px 0">Loading…</div>
+  </div>
+</div>
 
-<div class="loadtest-panel" id="loadtestPanel">
-  <h3>🔥 Load Generator</h3>
-  <div class="lt-row">
-    <label>Events/sec</label>
-    <input type="range" id="ltRate" min="1" max="10000" value="100" oninput="updateLtLabels()">
-    <span class="lt-val" id="ltRateVal">10</span>
+<div class="config-panel" id="configPanel">
+  <h3>⚙ Runtime Config</h3>
+  <div class="config-field">
+    <label class="config-label">Admin Token (optional — required when auth enabled)</label>
+    <input id="configToken" type="password" class="config-input" placeholder="FLUX_ADMIN_TOKEN">
   </div>
-  <div class="lt-row">
-    <label>Entities</label>
-    <input type="range" id="ltEntities" min="1" max="10000" value="50" oninput="updateLtLabels()">
-    <span class="lt-val" id="ltEntitiesVal">5</span>
+  <hr class="config-divider">
+  <div class="config-field">
+    <label class="config-checkbox-row">
+      <input type="checkbox" id="cfgRateLimitEnabled">
+      <span>Rate Limiting Enabled</span>
+    </label>
   </div>
-  <div class="lt-row">
-    <label>Batch size</label>
-    <input type="range" id="ltBatch" min="10" max="1000" value="100" oninput="updateLtLabels()">
-    <span class="lt-val" id="ltBatchVal">50</span>
+  <div class="config-field">
+    <label class="config-label">Rate Limit (events / namespace / minute)</label>
+    <input id="cfgRateLimit" type="number" class="config-input" min="1">
   </div>
-  <div class="lt-row">
-    <label>Duration (s)</label>
-    <input type="range" id="ltDuration" min="0" max="600" value="60" step="10" oninput="updateLtLabels()">
-    <span class="lt-val" id="ltDurationVal">60</span>
+  <div class="config-field">
+    <label class="config-label">Body Size — Single Event (bytes)</label>
+    <input id="cfgBodySingle" type="number" class="config-input" min="1">
   </div>
-  <div class="lt-row">
-    <label>Prefix</label>
-    <input type="text" id="ltPrefix" value="loadtest" 
-      style="background:var(--bg3);border:1px solid var(--border);border-radius:4px;padding:4px 8px;color:var(--text);font-size:12px;width:120px;font-family:'JetBrains Mono',monospace;">
+  <div class="config-field">
+    <label class="config-label">Body Size — Batch Events (bytes)</label>
+    <input id="cfgBodyBatch" type="number" class="config-input" min="1">
   </div>
-  <div class="lt-row" style="font-size:10px;color:var(--text-dim);justify-content:center;">
-    ⚡ Runs on dedicated load-gen VM (192.168.50.40)
-  </div>
-  <button class="lt-btn" id="ltBtn" onclick="toggleLoadTestRun()">▶ Start</button>
-  <div class="lt-stats" id="ltStats" style="display:none">
-    <div>Sent: <span id="ltSent">0</span></div>
-    <div>Errors: <span id="ltErrors">0</span></div>
-    <div>Actual rate: <span id="ltActualRate">0</span>/s</div>
-    <div>Elapsed: <span id="ltElapsed">0s</span></div>
-  </div>
+  <button class="config-save-btn" onclick="saveAdminConfig()">Save</button>
+  <div class="config-feedback" id="configFeedback"></div>
 </div>
 
 <script>
@@ -1000,7 +1095,7 @@ function renderEntities() {
   for (const [type, cfg] of sortedTypes) {
     if (!groups[type] || groups[type].length === 0) continue;
     
-    const items = groups[type].sort((a, b) => a.id.localeCompare(b.id));
+    const items = groups[type].sort((a, b) => b.lastUpdated - a.lastUpdated);
     const autoCollapse = items.length > MAX_VISIBLE_ENTITIES;
     const isCollapsed = collapsedGroups.has(type) || (autoCollapse && !collapsedGroups.has('_expanded_' + type));
     
@@ -1116,13 +1211,10 @@ function flushUpdates() {
   // Update event count display
   document.getElementById('eventCount').textContent = eventCount + ' events';
   
-  // Flash updated entities
-  const flashedSet = new Set();
+  // Collect entities to flash — applied after render so DOM elements exist
+  const toFlash = new Set();
   for (const { entityId } of streamEventBuffer) {
-    if (!flashedSet.has(entityId)) {
-      flashedSet.add(entityId);
-      flashEntity(entityId);
-    }
+    toFlash.add(entityId);
   }
 
   // Add stream events (limited per frame)
@@ -1140,13 +1232,18 @@ function flushUpdates() {
   }
   while (container.children.length > 200) container.removeChild(container.lastChild);
   streamEventBuffer = [];
-  
-  // Re-render entities only if new ones appeared
+
+  // Re-render entities on every flush; only recompute types when new ones appear
   if (newEntitySeen) {
     newEntitySeen = false;
-    detectEntityTypes(); // Recompute dynamic types
+    detectEntityTypes();
     renderFilterBar();
-    renderEntities();
+  }
+  renderEntities();
+
+  // Flash after render so the newly-created DOM elements receive the class
+  for (const entityId of toFlash) {
+    flashEntity(entityId);
   }
 }
 
@@ -1238,94 +1335,201 @@ function applyServerPrefix() {
 loadState();
 connectWS();
 
-// ============ Load Test (Server-Side via load-gen VM) ============
-let ltRunning = false;
-let ltPollInterval = null;
+// ============ Connectors Panel ============
 
-function toggleLoadTest() {
-  document.getElementById('loadtestPanel').classList.toggle('visible');
+const CONNECTOR_ICONS = {
+  github: '🐙',
+  gmail: '📧',
+  linkedin: '💼',
+  calendar: '📅'
+};
+
+function toggleConnectors() {
+  const panel = document.getElementById('connectorsPanel');
+  const visible = panel.classList.toggle('visible');
+  if (visible) document.getElementById('configPanel').classList.remove('visible');
 }
 
-function updateLtLabels() {
-  document.getElementById('ltRateVal').textContent = document.getElementById('ltRate').value;
-  document.getElementById('ltEntitiesVal').textContent = document.getElementById('ltEntities').value;
-  document.getElementById('ltBatchVal').textContent = document.getElementById('ltBatch').value;
-  const dur = document.getElementById('ltDuration').value;
-  document.getElementById('ltDurationVal').textContent = dur === '0' ? '∞' : dur;
+function toggleConfig() {
+  const panel = document.getElementById('configPanel');
+  const visible = panel.classList.toggle('visible');
+  if (visible) {
+    document.getElementById('connectorsPanel').classList.remove('visible');
+    loadAdminConfig();
+  }
 }
 
-function toggleLoadTestRun() {
-  if (ltRunning) stopLoadTest();
-  else startLoadTest();
+async function loadAdminConfig() {
+  const feedback = document.getElementById('configFeedback');
+  feedback.className = 'config-feedback';
+  try {
+    const resp = await fetch('/api/admin/config');
+    if (!resp.ok) {
+      feedback.textContent = `Failed to load config (${resp.status})`;
+      feedback.className = 'config-feedback err';
+      return;
+    }
+    const cfg = await resp.json();
+    document.getElementById('cfgRateLimitEnabled').checked = !!cfg.rate_limit_enabled;
+    document.getElementById('cfgRateLimit').value = cfg.rate_limit_per_namespace_per_minute ?? '';
+    document.getElementById('cfgBodySingle').value = cfg.body_size_limit_single_bytes ?? '';
+    document.getElementById('cfgBodyBatch').value = cfg.body_size_limit_batch_bytes ?? '';
+  } catch(e) {
+    feedback.textContent = 'Network error loading config';
+    feedback.className = 'config-feedback err';
+  }
 }
 
-async function startLoadTest() {
-  const rate = parseInt(document.getElementById('ltRate').value);
-  const entities = parseInt(document.getElementById('ltEntities').value);
-  const batchSize = parseInt(document.getElementById('ltBatch').value);
-  const duration = parseInt(document.getElementById('ltDuration').value);
-  const prefix = document.getElementById('ltPrefix').value || 'loadtest';
+async function saveAdminConfig() {
+  const token = document.getElementById('configToken').value.trim();
+  const feedback = document.getElementById('configFeedback');
+  feedback.className = 'config-feedback';
+
+  const body = {
+    rate_limit_enabled: document.getElementById('cfgRateLimitEnabled').checked,
+    rate_limit_per_namespace_per_minute: parseInt(document.getElementById('cfgRateLimit').value) || null,
+    body_size_limit_single_bytes: parseInt(document.getElementById('cfgBodySingle').value) || null,
+    body_size_limit_batch_bytes: parseInt(document.getElementById('cfgBodyBatch').value) || null,
+  };
+  for (const k of Object.keys(body)) { if (body[k] === null) delete body[k]; }
+
+  const headers = { 'Content-Type': 'application/json' };
+  if (token) headers['Authorization'] = `Bearer ${token}`;
 
   try {
-    const resp = await fetch('/loadtest/start', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ rate, entities, batchSize, duration, prefix })
+    const resp = await fetch('/api/admin/config', {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify(body)
     });
-    const data = await resp.json();
-    if (resp.status === 409) {
-      alert('Load test already running!');
-      return;
-    }
-    if (!resp.ok) {
-      alert('Failed to start: ' + (data.error || 'unknown'));
-      return;
+    if (resp.ok) {
+      feedback.textContent = '✓ Config saved';
+      feedback.className = 'config-feedback ok';
+      setTimeout(() => { feedback.className = 'config-feedback'; }, 3000);
+    } else {
+      const data = await resp.json().catch(() => ({}));
+      feedback.textContent = data.error || `Error ${resp.status}`;
+      feedback.className = 'config-feedback err';
     }
   } catch(e) {
-    alert('Failed to connect: ' + e.message);
+    feedback.textContent = 'Network error';
+    feedback.className = 'config-feedback err';
+  }
+}
+
+async function loadConnectorStatus() {
+  try {
+    const resp = await fetch('/api/connectors');
+    if (!resp.ok) return;
+    const data = await resp.json();
+    renderConnectors(data.connectors || []);
+  } catch(e) {
+    document.getElementById('connectorsList').innerHTML =
+      '<div style="font-size:12px;color:var(--text-dim);text-align:center;padding:8px 0">Unavailable</div>';
+  }
+}
+
+function renderConnectors(connectors) {
+  const el = document.getElementById('connectorsList');
+  if (!connectors.length) {
+    el.innerHTML = '<div style="font-size:12px;color:var(--text-dim);text-align:center;padding:8px 0">No connectors found</div>';
     return;
   }
 
-  ltRunning = true;
-  const btn = document.getElementById('ltBtn');
-  btn.textContent = '■ Stop';
-  btn.classList.add('running');
-  document.getElementById('ltStats').style.display = 'block';
+  el.innerHTML = connectors.map(c => {
+    const icon = CONNECTOR_ICONS[c.name] || '🔌';
+    const connected = c.enabled && c.status === 'configured';
+    const badge = connected
+      ? '<span class="connector-badge connected">Connected</span>'
+      : '<span class="connector-badge not-connected">Not Connected</span>';
+    const action = connected
+      ? `<a href="#" class="disconnect" onclick="confirmDisconnect('${c.name}');return false">Disconnect</a>`
+      : `<a href="#" onclick="showPatForm('${c.name}');return false">Connect</a>`;
 
-  // Poll for stats
-  ltPollInterval = setInterval(async () => {
-    try {
-      const resp = await fetch('/loadtest/status');
-      const stats = await resp.json();
-      document.getElementById('ltSent').textContent = stats.sent.toLocaleString();
-      document.getElementById('ltErrors').textContent = stats.errors.toLocaleString();
-      document.getElementById('ltActualRate').textContent = stats.rate;
-      document.getElementById('ltElapsed').textContent = stats.elapsed + 's';
-
-      if (!stats.running) {
-        ltRunning = false;
-        clearInterval(ltPollInterval);
-        const btn = document.getElementById('ltBtn');
-        btn.textContent = '▶ Start';
-        btn.classList.remove('running');
-      }
-    } catch(e) {}
-  }, 2000);
+    return `
+      <div class="connector-row" id="connector-row-${c.name}" style="flex-wrap:wrap">
+        <div class="connector-info" id="connector-info-${c.name}">
+          <span class="connector-icon">${icon}</span>
+          <span class="connector-name">${c.name.charAt(0).toUpperCase() + c.name.slice(1)}</span>
+          ${badge}
+        </div>
+        <div class="connector-action" id="connector-action-${c.name}">${action}</div>
+        <div id="pat-form-${c.name}" style="display:none;width:100%;margin-top:6px">
+          <div style="display:flex;gap:5px;align-items:center">
+            <input id="pat-input-${c.name}" type="password" placeholder="Personal access token"
+              style="flex:1;font-size:11px;padding:3px 6px;background:var(--bg-dark,#0d1117);color:var(--text);border:1px solid var(--border);border-radius:4px;min-width:0;outline:none">
+            <a href="#" onclick="submitPat('${c.name}');return false" style="font-size:11px;color:var(--accent2);text-decoration:none;padding:3px 8px;border:1px solid var(--border);border-radius:4px;white-space:nowrap">Connect</a>
+            <a href="#" onclick="cancelPatForm('${c.name}');return false" style="font-size:11px;color:var(--text-dim);text-decoration:none">Cancel</a>
+          </div>
+          <div id="pat-error-${c.name}" style="font-size:10px;color:var(--red);margin-top:3px;display:none"></div>
+        </div>
+      </div>
+    `;
+  }).join('');
 }
 
-async function stopLoadTest() {
+function showPatForm(name) {
+  document.getElementById('connector-action-' + name).style.display = 'none';
+  document.getElementById('pat-form-' + name).style.display = 'block';
+  document.getElementById('pat-input-' + name).focus();
+}
+
+function cancelPatForm(name) {
+  document.getElementById('pat-form-' + name).style.display = 'none';
+  document.getElementById('pat-error-' + name).style.display = 'none';
+  document.getElementById('connector-action-' + name).style.display = '';
+}
+
+async function submitPat(name) {
+  const input = document.getElementById('pat-input-' + name);
+  const token = input.value.trim();
+  if (!token) return;
+
+  const errEl = document.getElementById('pat-error-' + name);
+  errEl.style.display = 'none';
+
   try {
-    await fetch('/loadtest/stop', { method: 'POST' });
-  } catch(e) {}
+    const resp = await fetch(`/api/connectors/${name}/token`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token })
+    });
 
-  ltRunning = false;
-  if (ltPollInterval) clearInterval(ltPollInterval);
-  ltPollInterval = null;
-
-  const btn = document.getElementById('ltBtn');
-  btn.textContent = '▶ Start';
-  btn.classList.remove('running');
+    if (resp.ok) {
+      input.value = '';
+      cancelPatForm(name);
+      loadConnectorStatus();
+    } else {
+      const data = await resp.json().catch(() => ({}));
+      errEl.textContent = data.error || 'Failed to connect';
+      errEl.style.display = 'block';
+    }
+  } catch(e) {
+    errEl.textContent = 'Network error';
+    errEl.style.display = 'block';
+  }
 }
+
+async function confirmDisconnect(name) {
+  if (!confirm(`Disconnect ${name}? This will remove your stored credentials.`)) return;
+
+  try {
+    const resp = await fetch(`/api/connectors/${name}/token`, { method: 'DELETE' });
+    if (resp.ok) {
+      loadConnectorStatus();
+    } else {
+      const data = await resp.json().catch(() => ({}));
+      alert(data.error || 'Failed to disconnect');
+    }
+  } catch(e) {
+    alert('Network error');
+  }
+}
+
+// Load connector status on page load and every 30 seconds
+loadConnectorStatus();
+setInterval(loadConnectorStatus, 30000);
+
 </script>
 </body>
 </html>

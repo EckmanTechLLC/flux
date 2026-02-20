@@ -156,8 +156,10 @@ impl IntoResponse for NamespaceError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::new_runtime_config;
     use crate::namespace::NamespaceRegistry;
     use crate::nats::EventPublisher;
+    use crate::rate_limit::RateLimiter;
     use axum::body::Body;
     use axum::http::{Request, StatusCode};
     use serde_json::json;
@@ -178,6 +180,8 @@ mod tests {
             event_publisher,
             namespace_registry,
             auth_enabled,
+            runtime_config: new_runtime_config(),
+            rate_limiter: Arc::new(RateLimiter::new()),
         };
 
         create_namespace_router(state)
@@ -260,6 +264,8 @@ mod tests {
             event_publisher: event_publisher1,
             namespace_registry: Arc::clone(&namespace_registry),
             auth_enabled: true,
+            runtime_config: new_runtime_config(),
+            rate_limiter: Arc::new(RateLimiter::new()),
         };
         let app1 = create_namespace_router(state1);
 
@@ -268,6 +274,8 @@ mod tests {
             event_publisher: event_publisher2,
             namespace_registry: Arc::clone(&namespace_registry),
             auth_enabled: true,
+            runtime_config: new_runtime_config(),
+            rate_limiter: Arc::new(RateLimiter::new()),
         };
         let app2 = create_namespace_router(state2);
 
@@ -305,6 +313,8 @@ mod tests {
             event_publisher,
             namespace_registry,
             auth_enabled: true,
+            runtime_config: new_runtime_config(),
+            rate_limiter: Arc::new(RateLimiter::new()),
         };
 
         let app = create_namespace_router(state);
@@ -367,6 +377,8 @@ mod tests {
             event_publisher,
             namespace_registry,
             auth_enabled: true,
+            runtime_config: new_runtime_config(),
+            rate_limiter: Arc::new(RateLimiter::new()),
         };
 
         let app = create_namespace_router(state);

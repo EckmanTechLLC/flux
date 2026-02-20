@@ -1,10 +1,15 @@
 use anyhow::Result;
-use axum::{routing::get, Router};
+use axum::Router;
 use flux::api::{
-    create_deletion_router, create_namespace_router, create_query_router, create_router,
-    ws_handler, AppState, DeletionAppState, QueryAppState, WsAppState,
+    create_admin_router, create_connector_router, create_deletion_router,
+    create_namespace_router, create_oauth_router, create_query_router, create_router,
+    create_ws_router, run_state_cleanup, AdminAppState, AppState, ConnectorAppState,
+    DeletionAppState, OAuthAppState, QueryAppState, StateManager, WsAppState,
 };
+use flux::rate_limit::RateLimiter;
 use flux::config;
+use flux::config::new_runtime_config;
+use flux::credentials::CredentialStore;
 use flux::namespace::NamespaceRegistry;
 use flux::nats::{EventPublisher, NatsClient};
 use flux::snapshot::{manager::SnapshotManager, recovery};
@@ -101,6 +106,16 @@ async fn main() -> Result<()> {
         .unwrap_or_else(|_| "3000".to_string())
         .parse::<u16>()?;
 
+    // Initialize runtime config (loaded from env vars, defaults otherwise)
+    let runtime_config = new_runtime_config();
+    info!("Runtime config initialized");
+
+    // Admin token (for PUT /api/admin/config)
+    let admin_token = std::env::var("FLUX_ADMIN_TOKEN").ok();
+    if admin_token.is_none() {
+        tracing::warn!("FLUX_ADMIN_TOKEN not set - admin config PUT is unrestricted");
+    }
+
     // Auth configuration (default: disabled for backward compatibility)
     let auth_enabled = std::env::var("FLUX_AUTH_ENABLED")
         .unwrap_or_else(|_| "false".to_string())
@@ -112,11 +127,43 @@ async fn main() -> Result<()> {
     // Create namespace registry (for auth mode)
     let namespace_registry = Arc::new(NamespaceRegistry::new());
 
+    // Initialize credential store (for connector framework)
+    let credential_store = std::env::var("FLUX_ENCRYPTION_KEY")
+        .ok()
+        .and_then(|key| {
+            let db_path = std::env::var("FLUX_CREDENTIALS_DB")
+                .unwrap_or_else(|_| "credentials.db".to_string());
+
+            match CredentialStore::new(&db_path, &key) {
+                Ok(store) => {
+                    info!("Credential store initialized at {}", db_path);
+                    Some(Arc::new(store))
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        error = %e,
+                        "Failed to initialize credential store (connectors disabled)"
+                    );
+                    None
+                }
+            }
+        });
+
+    if credential_store.is_none() {
+        tracing::warn!("FLUX_ENCRYPTION_KEY not set - connector framework disabled");
+    }
+
+    // Initialize rate limiter (per-namespace token buckets, auth-gated)
+    let rate_limiter = Arc::new(RateLimiter::new());
+    info!("Rate limiter initialized");
+
     // Create ingestion API router
     let ingestion_state = AppState {
         event_publisher: event_publisher.clone(),
         namespace_registry: Arc::clone(&namespace_registry),
         auth_enabled,
+        runtime_config: Arc::clone(&runtime_config),
+        rate_limiter,
     };
     let ingestion_router = create_router(ingestion_state.clone());
 
@@ -133,24 +180,74 @@ async fn main() -> Result<()> {
     };
     let deletion_router = create_deletion_router(deletion_state);
 
-    // Create WebSocket API router
+    // Create WebSocket API router (with auth middleware)
     let ws_state = Arc::new(WsAppState {
         state_engine: Arc::clone(&state_engine),
+        namespace_registry: Arc::clone(&namespace_registry),
+        auth_enabled,
     });
-    let ws_router = Router::new()
-        .route("/api/ws", get(ws_handler))
-        .with_state(ws_state);
+    let ws_router = create_ws_router(ws_state);
 
     // Create Query API router
     let query_state = Arc::new(QueryAppState { state_engine });
     let query_router = create_query_router(query_state);
+
+    // Create Connector API router
+    let connector_state = ConnectorAppState {
+        credential_store: credential_store.clone(),
+        namespace_registry: Arc::clone(&namespace_registry),
+        auth_enabled,
+    };
+    let connector_router = create_connector_router(connector_state);
+
+    // Create OAuth API router (requires credential store)
+    let oauth_router = if let Some(ref store) = credential_store {
+        // Create OAuth state manager
+        let state_manager = StateManager::new(600); // 10 minutes expiry
+
+        // Start state cleanup background task
+        let cleanup_manager = state_manager.clone();
+        tokio::spawn(async move {
+            run_state_cleanup(cleanup_manager, 300).await; // Cleanup every 5 minutes
+        });
+        info!("OAuth state manager started");
+
+        // Get callback base URL from environment
+        let callback_base_url = std::env::var("FLUX_OAUTH_CALLBACK_BASE_URL")
+            .unwrap_or_else(|_| "http://localhost:3000".to_string());
+
+        info!("OAuth callback base URL: {}", callback_base_url);
+
+        let oauth_state = OAuthAppState {
+            credential_store: Arc::clone(store),
+            namespace_registry: Arc::clone(&namespace_registry),
+            state_manager,
+            auth_enabled,
+            callback_base_url,
+        };
+
+        create_oauth_router(oauth_state)
+    } else {
+        // OAuth disabled without credential store
+        Router::new()
+    };
+
+    // Create Admin API router
+    let admin_state = AdminAppState {
+        runtime_config,
+        admin_token,
+    };
+    let admin_router = create_admin_router(admin_state);
 
     // Combine routers
     let app = ingestion_router
         .merge(namespace_router)
         .merge(deletion_router)
         .merge(ws_router)
-        .merge(query_router);
+        .merge(query_router)
+        .merge(connector_router)
+        .merge(oauth_router)
+        .merge(admin_router);
 
     let addr = format!("0.0.0.0:{}", port);
     info!("Starting HTTP server on {}", addr);
