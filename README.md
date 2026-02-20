@@ -47,8 +47,6 @@ Flux is infrastructure that works for any domain:
 
 **Core engine stable. Connector framework in active development (ADR-005).**
 
-Deployed at `https://flux.eckman-tech.com` with 7 VMs publishing system metrics.
-
 ## Documentation
 
 **Core Docs:**
