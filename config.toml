@@ -3,7 +3,7 @@
 [snapshot]
 enabled = true
 interval_minutes = 5
-directory = "/var/lib/flux/snapshots"
+directory = "/data/snapshots"
 keep_count = 10
 
 [nats]
