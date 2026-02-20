@@ -216,6 +216,28 @@ impl StateEngine {
         }
     }
 
+    /// Determine consumer configuration for NATS event replay.
+    ///
+    /// Returns `(should_reset, deliver_policy)`:
+    /// - `should_reset`: when `true`, the existing durable consumer must be deleted before
+    ///   creation. Required when replaying from the beginning (no snapshot), because
+    ///   `get_or_create_consumer` silently returns the existing consumer at its current ack
+    ///   offset, ignoring the requested `DeliverPolicy`.
+    /// - `deliver_policy`: configured delivery start point.
+    pub(crate) fn consumer_delivery(
+        start_sequence: Option<u64>,
+    ) -> (bool, async_nats::jetstream::consumer::DeliverPolicy) {
+        match start_sequence {
+            None => (true, async_nats::jetstream::consumer::DeliverPolicy::All),
+            Some(seq) => (
+                false,
+                async_nats::jetstream::consumer::DeliverPolicy::ByStartSequence {
+                    start_sequence: seq + 1,
+                },
+            ),
+        }
+    }
+
     /// Run NATS subscriber to process events and update state
     ///
     /// This method subscribes to "flux.events.>" and processes all events,
@@ -223,7 +245,8 @@ impl StateEngine {
     ///
     /// # Arguments
     /// * `start_sequence` - Optional NATS sequence to start from (for recovery).
-    ///                      If None, starts from beginning. If Some(n), starts from n+1.
+    ///                      If None, replays all events from the beginning.
+    ///                      If Some(n), resumes from n+1 (after snapshot).
     pub async fn run_subscriber(
         self: Arc<Self>,
         jetstream: jetstream::Context,
@@ -231,42 +254,51 @@ impl StateEngine {
     ) -> Result<()> {
         info!("Starting state engine NATS subscriber");
 
-        // Get or create consumer
         let stream = jetstream
             .get_stream("FLUX_EVENTS")
             .await
             .context("Failed to get FLUX_EVENTS stream")?;
 
-        // Configure deliver policy based on start_sequence
-        let deliver_policy = match start_sequence {
-            Some(seq) => {
-                info!(
-                    start_sequence = seq + 1,
-                    "Recovering from snapshot, replaying events from sequence {}",
-                    seq + 1
-                );
-                async_nats::jetstream::consumer::DeliverPolicy::ByStartSequence {
-                    start_sequence: seq + 1,
-                }
-            }
-            None => {
-                info!("No snapshot, processing all events from beginning");
-                async_nats::jetstream::consumer::DeliverPolicy::All
-            }
-        };
+        let (should_reset, deliver_policy) = Self::consumer_delivery(start_sequence);
 
-        let consumer = stream
-            .get_or_create_consumer(
-                "flux-state-engine",
-                async_nats::jetstream::consumer::pull::Config {
+        let consumer = if should_reset {
+            // No snapshot: must replay from the beginning.
+            // Delete any existing durable consumer — get_or_create_consumer would silently
+            // return it at its current ack offset, ignoring DeliverPolicy::All.
+            info!("No snapshot, resetting consumer for full replay from beginning");
+            match stream.delete_consumer("flux-state-engine").await {
+                Ok(_) => info!("Deleted existing 'flux-state-engine' consumer"),
+                Err(e) => info!(error = %e, "No existing consumer to delete (normal on first start)"),
+            }
+            stream
+                .create_consumer(async_nats::jetstream::consumer::pull::Config {
                     durable_name: Some("flux-state-engine".to_string()),
                     filter_subject: "flux.events.>".to_string(),
                     deliver_policy,
                     ..Default::default()
-                },
-            )
-            .await
-            .context("Failed to create consumer")?;
+                })
+                .await
+                .context("Failed to create consumer")?
+        } else {
+            let seq = start_sequence.unwrap();
+            info!(
+                start_sequence = seq + 1,
+                "Recovering from snapshot, replaying events from sequence {}",
+                seq + 1
+            );
+            stream
+                .get_or_create_consumer(
+                    "flux-state-engine",
+                    async_nats::jetstream::consumer::pull::Config {
+                        durable_name: Some("flux-state-engine".to_string()),
+                        filter_subject: "flux.events.>".to_string(),
+                        deliver_policy,
+                        ..Default::default()
+                    },
+                )
+                .await
+                .context("Failed to get or create consumer")?
+        };
 
         info!("State engine consumer created, processing events...");
 

@@ -319,6 +319,40 @@ fn test_tombstone_event_deletes_entity() {
 }
 
 #[test]
+fn test_consumer_delivery_no_snapshot_resets_and_delivers_all() {
+    let (should_reset, policy) = StateEngine::consumer_delivery(None);
+    assert!(
+        should_reset,
+        "no snapshot: must reset consumer to avoid inheriting stale ack offset"
+    );
+    assert!(
+        matches!(
+            policy,
+            async_nats::jetstream::consumer::DeliverPolicy::All
+        ),
+        "no snapshot: must deliver all events from beginning"
+    );
+}
+
+#[test]
+fn test_consumer_delivery_with_snapshot_resumes_from_next_sequence() {
+    let (should_reset, policy) = StateEngine::consumer_delivery(Some(99));
+    assert!(
+        !should_reset,
+        "snapshot present: reuse existing durable consumer"
+    );
+    assert!(
+        matches!(
+            policy,
+            async_nats::jetstream::consumer::DeliverPolicy::ByStartSequence {
+                start_sequence: 100
+            }
+        ),
+        "snapshot at seq 99: must deliver from seq 100 (seq+1)"
+    );
+}
+
+#[test]
 fn test_deletion_broadcast() {
     let engine = Arc::new(StateEngine::new());
 
