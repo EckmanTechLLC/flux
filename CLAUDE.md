@@ -106,11 +106,20 @@ These were in early design docs but deemed unnecessary (2026-02-14):
 
 **Tests:** 142 Flux core + 22 connector-manager + 3 doc tests
 
+### ADR-006: Security Hardening (COMPLETE ✅ 2026-02-20)
+- [x] Runtime config + Admin API
+- [x] Body size limits
+- [x] Rate limiting (token bucket, per-namespace)
+- [x] WebSocket auth
+- [x] Admin Config UI panel
+
+### Bugfix: NATS durable consumer replay (2026-02-20)
+- [x] On restart without snapshot, existing durable consumer was reused at its ack offset, losing pre-restart entities. Fixed by deleting and recreating consumer when no snapshot exists.
+
 ### ADR-005: Connector Framework (IN PROGRESS 🔧 2026-02-20)
 - [x] ADR-005: Connector Framework
 - [x] Phase 1: Framework infrastructure (connector interface, credential storage, OAuth flow, manager core, status API, UI panel)
-- [x] Phase 2 partial: GitHub connector (OAuth config, API client, transformer, implementation)
-- [ ] Phase 2 Task 5: End-to-end test (`tests/integration/github_connector_test.rs`)
+- [x] Phase 2: GitHub connector (OAuth config, API client, transformer, implementation, validated in production)
 - [ ] Phase 3: Gmail, LinkedIn, Calendar connectors
 - [ ] Phase 4: Community SDK + Marketplace
 
