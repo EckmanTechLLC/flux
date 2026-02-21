@@ -120,6 +120,7 @@ These were in early design docs but deemed unnecessary (2026-02-14):
 **Docker Gotchas (learned the hard way):**
 - `rust:latest` builds against glibc 2.39 — runtime base must be `ubuntu:24.04` (not debian:bookworm-slim)
 - Workspace Cargo.toml requires ALL members present in build context — Dockerfiles must COPY all workspace members
+- Workspace members do NOT have their own Cargo.lock — only root Cargo.lock exists, do NOT reference connector-manager/Cargo.lock in Dockerfiles
 - Binary output goes to workspace `/app/target/release/` NOT to `/app/connector-manager/target/release/`
 - Build success does not mean container restarted — always run `docker compose up -d` after build
 - Verify new code is running by checking logs for expected startup messages
