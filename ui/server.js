@@ -7,6 +7,7 @@ const { execSync, spawn } = require('child_process');
 const PORT = process.env.UI_PORT || 8082;
 const FLUX_API = process.env.FLUX_API || 'http://localhost:3000';
 const FLUX_WS = process.env.FLUX_WS || 'ws://localhost:3000/api/ws';
+const CONNECTOR_MANAGER_API = process.env.CONNECTOR_MANAGER_API || 'http://localhost:3001';
 const LOADGEN_HOST = 'etl@192.168.50.40';
 const LOADGEN_SCRIPT = '/home/etl/flux-loadgen.sh';
 
@@ -99,6 +100,32 @@ const server = http.createServer(async (req, res) => {
   if (req.url === '/loadtest/status' && req.method === 'GET') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(loadgenStats));
+    return;
+  }
+
+  // Connector-manager proxy
+  if (req.url.startsWith('/api/connector-manager/')) {
+    try {
+      let body = '';
+      if (['POST', 'PUT', 'PATCH'].includes(req.method)) {
+        body = await new Promise((resolve, reject) => {
+          let chunks = '';
+          req.on('data', c => chunks += c);
+          req.on('end', () => resolve(chunks));
+          req.on('error', reject);
+        });
+      }
+      const cmPath = req.url.replace('/api/connector-manager', '/api');
+      const opts = { method: req.method, headers: { 'Content-Type': 'application/json' } };
+      if (body) opts.body = body;
+      const resp = await fetch(`${CONNECTOR_MANAGER_API}${cmPath}`, opts);
+      const data = await resp.text();
+      res.writeHead(resp.status, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+      res.end(data);
+    } catch (e) {
+      res.writeHead(502);
+      res.end(JSON.stringify({ error: e.message }));
+    }
     return;
   }
 

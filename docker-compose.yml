@@ -56,6 +56,7 @@ services:
     environment:
       - FLUX_API=http://flux:3000
       - FLUX_WS=ws://flux:3000/api/ws
+      - CONNECTOR_MANAGER_API=http://connector-manager:3001
     ports:
       - "8082:8082"
     networks:
@@ -79,6 +80,7 @@ services:
       - FLUX_API_URL=http://flux:3000
       - FLUX_ENCRYPTION_KEY=${FLUX_ENCRYPTION_KEY}
       - FLUX_CREDENTIALS_DB=/data/credentials.db
+      - GENERIC_CONFIG_DB=${GENERIC_CONFIG_DB}
     volumes:
       - ./data:/data
     networks:

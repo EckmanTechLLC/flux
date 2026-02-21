@@ -4,7 +4,7 @@
 //! and starts polling schedulers for each user-connector pair.
 
 use crate::registry::get_all_connectors;
-use crate::scheduler::{ConnectorScheduler, ConnectorStatus};
+use crate::runners::builtin::{ConnectorScheduler, ConnectorStatus};
 use anyhow::{Context, Result};
 use flux::credentials::CredentialStore;
 use std::collections::HashMap;

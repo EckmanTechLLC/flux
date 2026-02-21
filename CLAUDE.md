@@ -1,7 +1,7 @@
 # Flux Context for Claude
 
-**Last Updated:** 2026-02-20
-**Status:** Active development — Connector Framework (ADR-005)
+**Last Updated:** 2026-02-21
+**Status:** Active development — Connector Framework (ADR-007)
 
 ---
 
@@ -103,8 +103,30 @@ These were in early design docs but deemed unnecessary (2026-02-14):
 - NATS monitoring: 8223
 - Flux API (HTTP + WebSocket): 3000
 - Flux UI: 8082
+- Connector Manager API: 3001 (internal only)
 
-**Tests:** 142 Flux core + 22 connector-manager + 3 doc tests
+**Docker Rules — CRITICAL:**
+- NEVER run docker commands yourself. ALWAYS tell the user what to run.
+- Always use --no-cache for Rust services or changes won't apply.
+- After any code change, tell the user to rebuild AND restart — both steps required.
+- When in doubt, rebuild everything: `docker compose build --no-cache && docker compose up -d`
+- Commands (run from /home/etl/projects/flux):
+  - `flux`: `docker compose build --no-cache flux && docker compose up -d flux`
+  - `connector-manager`: `docker compose build --no-cache connector-manager && docker compose up -d connector-manager`
+  - `flux-ui`: `docker compose build --no-cache flux-ui && docker compose up -d flux-ui`
+  - All: `docker compose build --no-cache && docker compose up -d`
+  - `nats`: `docker compose up -d nats` (stock image, no build)
+
+**Docker Gotchas (learned the hard way):**
+- `rust:latest` builds against glibc 2.39 — runtime base must be `ubuntu:24.04` (not debian:bookworm-slim)
+- Workspace Cargo.toml requires ALL members present in build context — Dockerfiles must COPY all workspace members
+- Binary output goes to workspace `/app/target/release/` NOT to `/app/connector-manager/target/release/`
+- Build success does not mean container restarted — always run `docker compose up -d` after build
+- Verify new code is running by checking logs for expected startup messages
+
+**Tests:** 142 Flux core + 43 connector-manager + 3 doc tests
+
+**ADR-007 Phase 3A COMPLETE ✅ 2026-02-21 (tested in production)**
 
 ### ADR-006: Security Hardening (COMPLETE ✅ 2026-02-20)
 - [x] Runtime config + Admin API
@@ -116,12 +138,22 @@ These were in early design docs but deemed unnecessary (2026-02-14):
 ### Bugfix: NATS durable consumer replay (2026-02-20)
 - [x] On restart without snapshot, existing durable consumer was reused at its ack offset, losing pre-restart entities. Fixed by deleting and recreating consumer when no snapshot exists.
 
-### ADR-005: Connector Framework (IN PROGRESS 🔧 2026-02-20)
-- [x] ADR-005: Connector Framework
-- [x] Phase 1: Framework infrastructure (connector interface, credential storage, OAuth flow, manager core, status API, UI panel)
-- [x] Phase 2: GitHub connector (OAuth config, API client, transformer, implementation, validated in production)
-- [ ] Phase 3: Gmail, LinkedIn, Calendar connectors
-- [ ] Phase 4: Community SDK + Marketplace
+### ADR-005: Connector Framework (SUPERSEDED by ADR-007)
+- [x] Phase 1: Framework infrastructure
+- [x] Phase 2: GitHub connector (validated in production)
+- [ ] Phase 3+: Superseded by ADR-007
+
+### ADR-007: Universal Connector Framework (IN PROGRESS 🔧 2026-02-21)
+- [x] Connector-manager refactor: builtin/generic/named runner modules separated (runners/)
+- [x] ConnectorType enum added to types.rs
+- [x] Phase 3A Task 1: Generic config storage (GenericConfigStore, AuthType, SQLite)
+- [x] Phase 3A Task 2: Bento runner (subprocess spawning, YAML template rendering)
+- [x] Phase 3A Task 3: API endpoints (POST /api/connectors/generic, DELETE, GET /api/connectors)
+- [x] Phase 3A Task 4: UI form (Add Generic Source, proxy in server.js)
+- [x] Phase 3A Bugfixes: rate_limit_resources interval, formatValue nested objects/arrays, UI rebuild
+- [x] Phase 3A Tested: no-auth (CoinGecko, httpbin), bearer (Polygon), API key header (Brave Search)
+- [ ] Phase 3B: Named connector (Singer taps)
+- [ ] Phase 3C: Polish (webhooks, error alerting, manual trigger)
 
 ---
 

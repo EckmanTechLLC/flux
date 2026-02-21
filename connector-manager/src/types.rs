@@ -1,5 +1,13 @@
 use serde::{Deserialize, Serialize};
 
+/// Identifies which runner backend handles a connector instance.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum ConnectorType {
+    Builtin,
+    Generic,
+    Named,
+}
+
 /// OAuth configuration for a connector.
 ///
 /// Defines the OAuth 2.0 endpoints and scopes required to authenticate

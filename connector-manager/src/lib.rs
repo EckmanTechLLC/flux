@@ -74,14 +74,17 @@
 
 mod connector;
 mod types;
+pub mod api;
 pub mod connectors;
+pub mod generic_config;
 pub mod manager;
 pub mod registry;
-pub mod scheduler;
+pub mod runners;
 
 // Re-export public types
 pub use connector::Connector;
 pub use manager::ConnectorManager;
+pub use runners::builtin::{ConnectorScheduler, ConnectorStatus};
 pub use types::OAuthConfig;
 
 // Re-export FluxEvent and Credentials from flux crate for convenience

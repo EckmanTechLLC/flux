@@ -6,14 +6,15 @@ WORKDIR /app
 # Copy manifests
 COPY Cargo.toml Cargo.lock ./
 
-# Copy source code
+# Copy all workspace members
 COPY src ./src
+COPY connector-manager ./connector-manager
 
-# Build release binary
-RUN cargo build --release
+# Build release binary (flux only)
+RUN cargo build --release -p flux
 
 # Runtime stage
-FROM debian:bookworm-slim
+FROM ubuntu:24.04
 
 # Install required runtime dependencies
 RUN apt-get update && apt-get install -y \

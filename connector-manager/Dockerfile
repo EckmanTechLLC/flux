@@ -15,15 +15,18 @@ COPY src ./src
 COPY connector-manager/src ./connector-manager/src
 
 # Build release binary
-RUN cargo build --release --manifest-path connector-manager/Cargo.toml
+RUN cargo build --release -p connector-manager
 
 # Runtime stage
-FROM debian:bookworm-slim
+FROM ubuntu:24.04
 
 RUN apt-get update && apt-get install -y \
-    ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
+    ca-certificates curl \
+    && curl -sSL https://github.com/warpstreamlabs/bento/releases/download/v1.15.0/bento_1.15.0_linux_amd64.tar.gz \
+    | tar -xz -C /usr/local/bin bento \
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
 
-COPY --from=builder /app/connector-manager/target/release/connector-manager /usr/local/bin/connector-manager
+COPY --from=builder /app/target/release/connector-manager /usr/local/bin/connector-manager
 
 CMD ["connector-manager"]

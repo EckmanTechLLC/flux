@@ -506,7 +506,9 @@
     position: fixed;
     top: 64px;
     right: 16px;
-    width: 300px;
+    width: 380px;
+    max-height: calc(100vh - 100px);
+    overflow-y: auto;
     background: var(--bg2);
     border: 1px solid var(--border);
     border-radius: 12px;
@@ -813,6 +815,50 @@
   <div id="connectorsList">
     <div style="font-size:12px;color:var(--text-dim);text-align:center;padding:12px 0">Loading…</div>
   </div>
+  <hr class="config-divider" style="margin-top:12px">
+  <button onclick="toggleGenericForm()" style="width:100%;padding:6px;background:var(--bg3);border:1px solid var(--border);border-radius:6px;color:var(--text-dim);font-size:12px;cursor:pointer;transition:all 0.2s">+ Add Generic Source</button>
+  <div id="genericSourceForm" style="display:none;margin-top:10px">
+    <div class="config-field">
+      <label class="config-label">Source Name</label>
+      <input id="gsName" type="text" class="config-input" placeholder="Bitcoin Price">
+    </div>
+    <div class="config-field">
+      <label class="config-label">URL</label>
+      <input id="gsUrl" type="text" class="config-input" placeholder="https://api.example.com/data">
+    </div>
+    <div style="display:flex;gap:6px">
+      <div class="config-field" style="flex:1">
+        <label class="config-label">Poll Every (sec)</label>
+        <input id="gsPoll" type="number" class="config-input" value="300" min="10">
+      </div>
+      <div class="config-field" style="flex:1">
+        <label class="config-label">Entity Key</label>
+        <input id="gsEntityKey" type="text" class="config-input" placeholder="bitcoin">
+      </div>
+    </div>
+    <div class="config-field">
+      <label class="config-label">Namespace</label>
+      <input id="gsNamespace" type="text" class="config-input" value="personal">
+    </div>
+    <div class="config-field">
+      <label class="config-label">Auth Type</label>
+      <select id="gsAuthType" class="config-input" onchange="onAuthTypeChange()">
+        <option value="none">None</option>
+        <option value="bearer">Bearer Token</option>
+        <option value="api_key">API Key Header</option>
+      </select>
+    </div>
+    <div id="gsTokenField" class="config-field" style="display:none">
+      <label class="config-label">Token</label>
+      <input id="gsToken" type="password" class="config-input" placeholder="Bearer token or API key value">
+    </div>
+    <div id="gsHeaderNameField" class="config-field" style="display:none">
+      <label class="config-label">API Key Header Name</label>
+      <input id="gsHeaderName" type="text" class="config-input" placeholder="X-API-Key">
+    </div>
+    <button class="config-save-btn" onclick="addGenericSource()">Add Source</button>
+    <div class="config-feedback" id="gsFormFeedback"></div>
+  </div>
 </div>
 
 <div class="config-panel" id="configPanel">
@@ -988,7 +1034,8 @@ function isStale(ts) {
 function formatValue(v) {
   if (typeof v === 'number') return Number.isInteger(v) ? v.toString() : v.toFixed(2);
   if (typeof v === 'boolean') return v ? '✓' : '✗';
-  if (Array.isArray(v)) return v.join(', ');
+  if (Array.isArray(v)) return v.map(i => typeof i === 'object' && i !== null ? JSON.stringify(i) : String(i)).join(', ');
+  if (typeof v === 'object' && v !== null) return JSON.stringify(v);
   return String(v);
 }
 
@@ -1419,10 +1466,10 @@ async function saveAdminConfig() {
 
 async function loadConnectorStatus() {
   try {
-    const resp = await fetch('/api/connectors');
+    const resp = await fetch('/api/connector-manager/connectors');
     if (!resp.ok) return;
     const data = await resp.json();
-    renderConnectors(data.connectors || []);
+    renderConnectors(Array.isArray(data) ? data : (data.connectors || []));
   } catch(e) {
     document.getElementById('connectorsList').innerHTML =
       '<div style="font-size:12px;color:var(--text-dim);text-align:center;padding:8px 0">Unavailable</div>';
@@ -1437,8 +1484,37 @@ function renderConnectors(connectors) {
   }
 
   el.innerHTML = connectors.map(c => {
-    const icon = CONNECTOR_ICONS[c.name] || '🔌';
-    const connected = c.enabled && c.status === 'configured';
+    const ctype = c.type || 'builtin';
+    const icon = CONNECTOR_ICONS[c.name.toLowerCase()] || (ctype === 'generic' ? '🌐' : '🔌');
+    const typeBadge = `<span style="font-size:9px;padding:1px 5px;border-radius:8px;background:rgba(108,92,231,0.12);color:var(--accent);margin-left:4px">${ctype}</span>`;
+
+    if (ctype === 'generic') {
+      let statusBg, statusFg;
+      if (c.status === 'running') {
+        statusBg = 'rgba(0,210,160,0.12)'; statusFg = 'var(--green)';
+      } else if (c.status === 'error') {
+        statusBg = 'rgba(255,107,107,0.12)'; statusFg = 'var(--red)';
+      } else {
+        statusBg = 'rgba(106,106,128,0.15)'; statusFg = 'var(--text-dim)';
+      }
+      const statusBadge = `<span class="connector-badge" style="background:${statusBg};color:${statusFg}">${c.status}</span>`;
+      const errMsg = c.last_error ? `<div style="font-size:10px;color:var(--red);margin-top:3px;word-break:break-all">${c.last_error}</div>` : '';
+      return `
+        <div class="connector-row" style="flex-wrap:wrap">
+          <div class="connector-info">
+            <span class="connector-icon">${icon}</span>
+            <span class="connector-name">${c.name}</span>
+            ${typeBadge}
+            ${statusBadge}
+            <button onclick="deleteGenericSource('${c.source_id}')" style="margin-left:auto;padding:2px 8px;font-size:11px;background:rgba(255,107,107,0.15);border:1px solid rgba(255,107,107,0.3);border-radius:4px;color:var(--red);cursor:pointer">Remove</button>
+          </div>
+          ${errMsg}
+        </div>
+      `;
+    }
+
+    // Builtin connector — PAT form
+    const connected = c.enabled && (c.status === 'configured' || c.status === 'running');
     const badge = connected
       ? '<span class="connector-badge connected">Connected</span>'
       : '<span class="connector-badge not-connected">Not Connected</span>';
@@ -1451,6 +1527,7 @@ function renderConnectors(connectors) {
         <div class="connector-info" id="connector-info-${c.name}">
           <span class="connector-icon">${icon}</span>
           <span class="connector-name">${c.name.charAt(0).toUpperCase() + c.name.slice(1)}</span>
+          ${typeBadge}
           ${badge}
         </div>
         <div class="connector-action" id="connector-action-${c.name}">${action}</div>
@@ -1523,6 +1600,91 @@ async function confirmDisconnect(name) {
     }
   } catch(e) {
     alert('Network error');
+  }
+}
+
+// ============ Generic Source Form ============
+
+async function deleteGenericSource(sourceId) {
+  if (!confirm('Remove this source?')) return;
+  const resp = await fetch(`/api/connector-manager/connectors/generic/${sourceId}`, { method: 'DELETE' });
+  if (resp.ok || resp.status === 204) loadConnectorStatus();
+}
+
+function toggleGenericForm() {
+  const form = document.getElementById('genericSourceForm');
+  form.style.display = form.style.display === 'none' ? '' : 'none';
+}
+
+function onAuthTypeChange() {
+  const authType = document.getElementById('gsAuthType').value;
+  document.getElementById('gsTokenField').style.display = authType !== 'none' ? '' : 'none';
+  document.getElementById('gsHeaderNameField').style.display = authType === 'api_key' ? '' : 'none';
+}
+
+async function addGenericSource() {
+  const name = document.getElementById('gsName').value.trim();
+  const url = document.getElementById('gsUrl').value.trim();
+  const poll = parseInt(document.getElementById('gsPoll').value) || 300;
+  const entityKey = document.getElementById('gsEntityKey').value.trim();
+  const namespace = document.getElementById('gsNamespace').value.trim() || 'personal';
+  const authType = document.getElementById('gsAuthType').value;
+  const token = document.getElementById('gsToken').value.trim();
+  const headerName = document.getElementById('gsHeaderName').value.trim();
+  const feedback = document.getElementById('gsFormFeedback');
+
+  if (!name || !url || !entityKey) {
+    feedback.textContent = 'Name, URL, and Entity Key are required';
+    feedback.className = 'config-feedback err';
+    return;
+  }
+
+  let authTypeBody;
+  if (authType === 'bearer') {
+    authTypeBody = 'bearer';
+  } else if (authType === 'api_key') {
+    authTypeBody = { api_key_header: headerName || 'X-API-Key' };
+  } else {
+    authTypeBody = 'none';
+  }
+
+  const body = {
+    name, url,
+    poll_interval_secs: poll,
+    entity_key: entityKey,
+    namespace,
+    auth_type: authTypeBody,
+  };
+  if (token && authType !== 'none') body.token = token;
+
+  feedback.className = 'config-feedback';
+  try {
+    const resp = await fetch('/api/connector-manager/connectors/generic', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (resp.ok) {
+      feedback.textContent = `✓ Source added (ID: ${data.source_id})`;
+      feedback.className = 'config-feedback ok';
+      document.getElementById('gsName').value = '';
+      document.getElementById('gsUrl').value = '';
+      document.getElementById('gsPoll').value = '300';
+      document.getElementById('gsEntityKey').value = '';
+      document.getElementById('gsNamespace').value = 'personal';
+      document.getElementById('gsAuthType').value = 'none';
+      document.getElementById('gsToken').value = '';
+      document.getElementById('gsHeaderName').value = '';
+      onAuthTypeChange();
+      loadConnectorStatus();
+    } else {
+      feedback.textContent = data.error || `Error ${resp.status}`;
+      feedback.className = 'config-feedback err';
+    }
+  } catch(e) {
+    feedback.textContent = 'Network error';
+    feedback.className = 'config-feedback err';
   }
 }
 
