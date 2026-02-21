@@ -1,21 +1,20 @@
 # Flux
 
-**Persistent, shared, event-sourced world state engine**
+**Any API becomes a living entity.**
 
-Flux ingests immutable events, derives live in-memory state from them, and exposes that evolving world to agents, services, and humans through subscriptions and replay.
+Flux is a persistent, event-sourced world state engine. It ingests events, derives real-time state, and exposes an evolving world to agents, services, and humans — through subscriptions, replay, and connectors that pull data from any source.
+
+Point a URL at Flux and it becomes a live entity. No code required.
 
 ## What Flux Is
 
-**Flux is a state engine, not just an event log.**
-
-- **Event-sourced:** State is derived from immutable events
-- **Persistent:** Events stored, state survives restarts
-- **Shared:** Multiple systems observe the same world state
-- **Real-time:** Updates propagate immediately to subscribers
-- **Replay-capable:** Can reprocess history from any point
+- **Event-sourced:** State is derived from immutable events — not stored directly
+- **Persistent:** Events and snapshots survive restarts
+- **Shared:** Multiple systems observe the same canonical world state
+- **Real-time:** Updates propagate immediately via WebSocket subscriptions
+- **Replay-capable:** Reprocess history from any point in time
 - **Domain-agnostic:** Works for any use case without encoding domain semantics
-
-**Critical distinction:** Flux owns state derivation and persistence semantics. Consumers receive state updates from Flux, not raw events.
+- **Connectable:** Built-in and generic connectors pull external APIs into Flux automatically
 
 <img width="2552" height="1300" alt="image" src="https://github.com/user-attachments/assets/07150439-0de9-428b-b7cb-5e3f9006c8b4" />
 
@@ -47,7 +46,7 @@ Flux is infrastructure that works for any domain:
 
 ## Status
 
-**Core engine stable. Connector framework in active development (ADR-005).**
+**Core engine stable and tested at 1M+ events.** Connector framework shipping — GitHub, generic HTTP, and stock/crypto connectors working in production.
 
 ## Documentation
 
@@ -250,29 +249,38 @@ curl -X PUT http://localhost:3000/api/admin/config \
 
 ## Connectors
 
-Flux can pull data from external APIs via the Connector Framework (ADR-005). Connectors are managed through the UI or API.
+Flux pulls data from external APIs via the Connector Framework ([ADR-005](docs/decisions/005-connector-framework.md), [ADR-007](docs/decisions/007-universal-connector-framework.md)). All connectors are managed through the UI — no YAML, no config files.
 
-**GitHub connector (available now):** Syncs repos, issues, PRs, and notifications as Flux entities.
+### Generic Connectors (any HTTP URL)
 
-**Setup via UI:**
-1. Open `http://localhost:8082`
-2. Navigate to **Connectors** panel
-3. Click **Connect GitHub**
-4. Complete OAuth flow
+Point any JSON API at Flux and it becomes a live entity. Configure entirely through the UI:
 
-**API:**
-```bash
-# List connectors and status
-curl http://localhost:3000/api/connectors
+- **URL** — any HTTP endpoint that returns JSON
+- **Poll interval** — how often to fetch
+- **Entity key** — how to name the resulting Flux entity
+- **Auth** — None, Bearer token, or custom API key header
 
-# Start OAuth flow
-curl http://localhost:3000/api/connectors/github/oauth/start
+Examples: cryptocurrency prices, stock quotes, weather APIs, internal services — anything with a URL.
 
-# Get connector status
-curl http://localhost:3000/api/connectors/github
-```
+### Built-in Connectors
+
+**GitHub:** Syncs repos, issues, PRs, and notifications as Flux entities via OAuth.
+
+1. Open the UI → **Connectors** panel
+2. Click **Connect GitHub** → complete OAuth flow
+3. Repos, issues, and notifications appear as live entities
 
 **GitHub OAuth setup:** Create an OAuth App at [github.com/settings/developers](https://github.com/settings/developers). Set the callback URL to `<FLUX_OAUTH_CALLBACK_BASE_URL>/api/connectors/github/oauth/callback`.
+
+### Connector API
+
+```bash
+# List all connectors and status
+curl http://localhost:3000/api/connectors
+
+# GitHub connector status
+curl http://localhost:3000/api/connectors/github
+```
 
 ## Web UI
 
