@@ -17,6 +17,8 @@ Flux ingests immutable events, derives live in-memory state from them, and expos
 
 **Critical distinction:** Flux owns state derivation and persistence semantics. Consumers receive state updates from Flux, not raw events.
 
+<img width="2552" height="1300" alt="image" src="https://github.com/user-attachments/assets/07150439-0de9-428b-b7cb-5e3f9006c8b4" />
+
 ## Architecture
 
 ```
