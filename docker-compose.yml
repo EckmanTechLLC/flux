@@ -91,8 +91,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '0.5'
-          memory: 256M
+          cpus: '2.0'
+          memory: 4G
 
 networks:
   flux-network:

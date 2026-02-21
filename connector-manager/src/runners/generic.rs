@@ -5,7 +5,7 @@ use anyhow::Result;
 use chrono::{DateTime, Utc};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use tracing::warn;
+use tracing::{error, info, warn};
 
 /// Runtime status for a single generic source process.
 #[derive(Clone, Debug)]
@@ -17,10 +17,16 @@ pub struct GenericStatus {
 }
 
 /// Generic connector runner — manages Bento subprocesses for HTTP polling sources.
+///
+/// Each source runs in a background tokio task that:
+/// 1. Writes the rendered YAML config to `/tmp/flux-bento-{id}.yaml`
+/// 2. Spawns `bento -c <path>` and waits for it to exit
+/// 3. Records an error in status if bento exits with a non-zero code
+/// 4. Waits 5 seconds, then repeats (crash recovery loop)
 pub struct GenericRunner {
     pub store: Arc<GenericConfigStore>,
     pub flux_api_url: String,
-    process_handles: Mutex<HashMap<String, tokio::process::Child>>,
+    task_handles: Mutex<HashMap<String, tokio::task::JoinHandle<()>>>,
     status_map: Arc<Mutex<HashMap<String, GenericStatus>>>,
 }
 
@@ -29,83 +35,55 @@ impl GenericRunner {
         Self {
             store,
             flux_api_url,
-            process_handles: Mutex::new(HashMap::new()),
+            task_handles: Mutex::new(HashMap::new()),
             status_map: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
-    /// Starts a Bento subprocess for the given generic source config.
+    /// Starts a background monitoring loop for the given generic source.
     ///
-    /// Writes the rendered YAML to `/tmp/flux-bento-{id}.yaml` and spawns
-    /// `bento -c <path>`. The auth token is passed as the `FLUX_GENERIC_TOKEN`
-    /// environment variable — it is never written to the config file.
+    /// The loop writes the Bento YAML config, spawns `bento -c <path>`, and
+    /// restarts it after a 5-second backoff if it crashes. The auth token is
+    /// passed as the `FLUX_GENERIC_TOKEN` environment variable — never written
+    /// to the config file.
     ///
-    /// If `bento` is not found on PATH, logs a warning and returns `Ok(())`.
+    /// If `bento` is not found on PATH, the loop logs a warning and exits.
     pub async fn start_source(
         &self,
         config: &GenericSourceConfig,
         token: Option<String>,
     ) -> Result<()> {
-        let yaml = render_bento_config(config, &self.flux_api_url);
-        let config_path = format!("/tmp/flux-bento-{}.yaml", config.id);
-
-        tokio::fs::write(&config_path, &yaml).await?;
-
-        let mut cmd = tokio::process::Command::new("bento");
-        cmd.arg("-c").arg(&config_path);
-        if let Some(token_val) = token {
-            cmd.env("FLUX_GENERIC_TOKEN", token_val);
-        }
-
-        let child = match cmd.spawn() {
-            Ok(c) => c,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                warn!(source_id = %config.id, "bento not found on PATH — skipping generic source");
-                return Ok(());
-            }
-            Err(e) => return Err(e.into()),
-        };
-
-        {
-            let mut handles = self.process_handles.lock().unwrap();
-            handles.insert(config.id.clone(), child);
-        }
-
         {
             let mut map = self.status_map.lock().unwrap();
-            let entry = map.entry(config.id.clone());
-            match entry {
-                std::collections::hash_map::Entry::Occupied(mut e) => {
-                    let s = e.get_mut();
-                    s.last_started = Some(Utc::now());
-                    s.last_error = None;
-                    s.restart_count += 1;
-                }
-                std::collections::hash_map::Entry::Vacant(e) => {
-                    e.insert(GenericStatus {
-                        source_id: config.id.clone(),
-                        last_started: Some(Utc::now()),
-                        last_error: None,
-                        restart_count: 0,
-                    });
-                }
-            }
+            map.entry(config.id.clone()).or_insert_with(|| GenericStatus {
+                source_id: config.id.clone(),
+                last_started: None,
+                last_error: None,
+                restart_count: 0,
+            });
         }
 
+        let config_owned = config.clone();
+        let flux_url = self.flux_api_url.clone();
+        let status_map = Arc::clone(&self.status_map);
+        let handle = tokio::spawn(run_bento_loop(config_owned, token, flux_url, status_map));
+
+        let mut handles = self.task_handles.lock().unwrap();
+        handles.insert(config.id.clone(), handle);
+        info!(source_id = %config.id, "Generic source started");
         Ok(())
     }
 
-    /// Kills the Bento subprocess and removes the temp config file.
+    /// Aborts the monitoring loop and removes the temp config file.
     ///
     /// No-ops if the source is not running or the config file is already gone.
     pub async fn stop_source(&self, source_id: &str) -> Result<()> {
-        let child = {
-            let mut handles = self.process_handles.lock().unwrap();
+        let handle = {
+            let mut handles = self.task_handles.lock().unwrap();
             handles.remove(source_id)
         };
-
-        if let Some(mut child) = child {
-            child.kill().await?;
+        if let Some(h) = handle {
+            h.abort();
         }
 
         let config_path = format!("/tmp/flux-bento-{}.yaml", source_id);
@@ -115,6 +93,7 @@ impl GenericRunner {
             }
         }
 
+        info!(source_id = %source_id, "Generic source stopped");
         Ok(())
     }
 
@@ -122,6 +101,87 @@ impl GenericRunner {
     pub fn status(&self) -> Vec<GenericStatus> {
         let map = self.status_map.lock().unwrap();
         map.values().cloned().collect()
+    }
+}
+
+/// Long-running loop: write YAML config, spawn bento, wait for exit, restart after 5s backoff.
+async fn run_bento_loop(
+    config: GenericSourceConfig,
+    token: Option<String>,
+    flux_api_url: String,
+    status_map: Arc<Mutex<HashMap<String, GenericStatus>>>,
+) {
+    loop {
+        let yaml = render_bento_config(&config, &flux_api_url);
+        let config_path = format!("/tmp/flux-bento-{}.yaml", config.id);
+
+        if let Err(e) = tokio::fs::write(&config_path, &yaml).await {
+            error!(source_id = %config.id, error = %e, "Failed to write Bento config — retrying in 5s");
+            tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+            continue;
+        }
+
+        let mut cmd = tokio::process::Command::new("bento");
+        cmd.arg("-c").arg(&config_path);
+        if let Some(ref token_val) = token {
+            cmd.env("FLUX_GENERIC_TOKEN", token_val);
+        }
+
+        {
+            let mut map = status_map.lock().unwrap();
+            if let Some(s) = map.get_mut(&config.id) {
+                s.last_started = Some(Utc::now());
+            }
+        }
+
+        let mut child = match cmd.spawn() {
+            Ok(c) => c,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                warn!(source_id = %config.id, "bento not found on PATH — stopping generic source");
+                return;
+            }
+            Err(e) => {
+                error!(source_id = %config.id, error = %e, "Failed to spawn bento — retrying in 5s");
+                let mut map = status_map.lock().unwrap();
+                if let Some(s) = map.get_mut(&config.id) {
+                    s.last_error = Some(e.to_string());
+                }
+                tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+                continue;
+            }
+        };
+
+        info!(source_id = %config.id, "Bento subprocess started");
+
+        match child.wait().await {
+            Ok(status) if status.success() => {
+                info!(source_id = %config.id, "Bento exited cleanly — restarting in 5s");
+                let mut map = status_map.lock().unwrap();
+                if let Some(s) = map.get_mut(&config.id) {
+                    s.restart_count += 1;
+                }
+            }
+            Ok(status) => {
+                let msg = format!("bento exited with code {}", status.code().unwrap_or(-1));
+                warn!(source_id = %config.id, %msg, "Bento crashed — restarting in 5s");
+                let mut map = status_map.lock().unwrap();
+                if let Some(s) = map.get_mut(&config.id) {
+                    s.last_error = Some(msg);
+                    s.restart_count += 1;
+                }
+            }
+            Err(e) => {
+                let msg = format!("failed to wait for bento: {}", e);
+                error!(source_id = %config.id, error = %e, "Error waiting for Bento — restarting in 5s");
+                let mut map = status_map.lock().unwrap();
+                if let Some(s) = map.get_mut(&config.id) {
+                    s.last_error = Some(msg);
+                    s.restart_count += 1;
+                }
+            }
+        }
+
+        tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
     }
 }
 
