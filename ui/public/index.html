@@ -859,6 +859,33 @@
     <button class="config-save-btn" onclick="addGenericSource()">Add Source</button>
     <div class="config-feedback" id="gsFormFeedback"></div>
   </div>
+  <button onclick="toggleNamedForm()" style="width:100%;padding:6px;margin-top:6px;background:var(--bg3);border:1px solid var(--border);border-radius:6px;color:var(--text-dim);font-size:12px;cursor:pointer;transition:all 0.2s">+ Add Named Source</button>
+  <div id="namedSourceForm" style="display:none;margin-top:10px">
+    <div class="config-field">
+      <label class="config-label">Tap Name</label>
+      <input id="nsTapName" type="text" class="config-input" placeholder="tap-github">
+    </div>
+    <div class="config-field">
+      <label class="config-label">Namespace</label>
+      <input id="nsNamespace" type="text" class="config-input" value="personal">
+    </div>
+    <div style="display:flex;gap:6px">
+      <div class="config-field" style="flex:1">
+        <label class="config-label">Entity Key Field</label>
+        <input id="nsEntityKeyField" type="text" class="config-input" placeholder="id">
+      </div>
+      <div class="config-field" style="flex:1">
+        <label class="config-label">Poll Every (sec)</label>
+        <input id="nsPoll" type="number" class="config-input" value="3600" min="60">
+      </div>
+    </div>
+    <div class="config-field">
+      <label class="config-label">Config JSON</label>
+      <textarea id="nsConfigJson" class="config-input" rows="4" placeholder='{"access_token": "your-token"}' style="resize:vertical;font-family:monospace;font-size:11px"></textarea>
+    </div>
+    <button class="config-save-btn" onclick="addNamedSource()">Add Source</button>
+    <div class="config-feedback" id="nsFormFeedback"></div>
+  </div>
 </div>
 
 <div class="config-panel" id="configPanel">
@@ -1485,8 +1512,34 @@ function renderConnectors(connectors) {
 
   el.innerHTML = connectors.map(c => {
     const ctype = c.type || 'builtin';
-    const icon = CONNECTOR_ICONS[c.name.toLowerCase()] || (ctype === 'generic' ? '🌐' : '🔌');
+    const icon = CONNECTOR_ICONS[c.name.toLowerCase()] || (ctype === 'generic' ? '🌐' : ctype === 'named' ? '🎵' : '🔌');
     const typeBadge = `<span style="font-size:9px;padding:1px 5px;border-radius:8px;background:rgba(108,92,231,0.12);color:var(--accent);margin-left:4px">${ctype}</span>`;
+
+    if (ctype === 'named') {
+      let statusBg, statusFg;
+      if (c.status === 'running') {
+        statusBg = 'rgba(0,210,160,0.12)'; statusFg = 'var(--green)';
+      } else if (c.status === 'error') {
+        statusBg = 'rgba(255,107,107,0.12)'; statusFg = 'var(--red)';
+      } else {
+        statusBg = 'rgba(106,106,128,0.15)'; statusFg = 'var(--text-dim)';
+      }
+      const statusBadge = `<span class="connector-badge" style="background:${statusBg};color:${statusFg}">${c.status}</span>`;
+      const errMsg = c.last_error ? `<div style="font-size:10px;color:var(--red);margin-top:3px;word-break:break-all">${c.last_error}</div>` : '';
+      return `
+        <div class="connector-row" style="flex-wrap:wrap">
+          <div class="connector-info">
+            <span class="connector-icon">${icon}</span>
+            <span class="connector-name">${c.name}</span>
+            ${typeBadge}
+            ${statusBadge}
+            <button onclick="syncNamedSource('${c.source_id}')" style="margin-left:auto;padding:2px 8px;font-size:11px;background:rgba(76,195,247,0.12);border:1px solid rgba(76,195,247,0.3);border-radius:4px;color:var(--blue);cursor:pointer">Sync Now</button>
+            <button onclick="deleteNamedSource('${c.source_id}')" style="margin-left:6px;padding:2px 8px;font-size:11px;background:rgba(255,107,107,0.15);border:1px solid rgba(255,107,107,0.3);border-radius:4px;color:var(--red);cursor:pointer">Remove</button>
+          </div>
+          ${errMsg}
+        </div>
+      `;
+    }
 
     if (ctype === 'generic') {
       let statusBg, statusFg;
@@ -1611,9 +1664,73 @@ async function deleteGenericSource(sourceId) {
   if (resp.ok || resp.status === 204) loadConnectorStatus();
 }
 
+async function syncNamedSource(sourceId) {
+  const resp = await fetch(`/api/connector-manager/connectors/named/${sourceId}/sync`, { method: 'POST' });
+  if (resp.ok || resp.status === 202) loadConnectorStatus();
+}
+
+async function deleteNamedSource(sourceId) {
+  if (!confirm('Remove this source?')) return;
+  const resp = await fetch(`/api/connector-manager/connectors/named/${sourceId}`, { method: 'DELETE' });
+  if (resp.ok || resp.status === 204) loadConnectorStatus();
+}
+
 function toggleGenericForm() {
   const form = document.getElementById('genericSourceForm');
   form.style.display = form.style.display === 'none' ? '' : 'none';
+}
+
+function toggleNamedForm() {
+  const form = document.getElementById('namedSourceForm');
+  form.style.display = form.style.display === 'none' ? '' : 'none';
+}
+
+async function addNamedSource() {
+  const tapName = document.getElementById('nsTapName').value.trim();
+  const namespace = document.getElementById('nsNamespace').value.trim() || 'personal';
+  const entityKeyField = document.getElementById('nsEntityKeyField').value.trim();
+  const poll = parseInt(document.getElementById('nsPoll').value) || 3600;
+  const configJson = document.getElementById('nsConfigJson').value.trim();
+  const feedback = document.getElementById('nsFormFeedback');
+
+  if (!tapName || !entityKeyField || !configJson) {
+    feedback.textContent = 'Tap name, entity key field, and config JSON are required';
+    feedback.className = 'config-feedback err';
+    return;
+  }
+
+  try { JSON.parse(configJson); } catch(e) {
+    feedback.textContent = 'Config JSON is invalid: ' + e.message;
+    feedback.className = 'config-feedback err';
+    return;
+  }
+
+  const body = { tap_name: tapName, namespace, entity_key_field: entityKeyField, config_json: configJson, poll_interval_secs: poll };
+  feedback.className = 'config-feedback';
+  try {
+    const resp = await fetch('/api/connector-manager/connectors/named', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (resp.ok) {
+      feedback.textContent = `✓ Source added (ID: ${data.source_id})`;
+      feedback.className = 'config-feedback ok';
+      document.getElementById('nsTapName').value = '';
+      document.getElementById('nsNamespace').value = 'personal';
+      document.getElementById('nsEntityKeyField').value = '';
+      document.getElementById('nsPoll').value = '3600';
+      document.getElementById('nsConfigJson').value = '';
+      loadConnectorStatus();
+    } else {
+      feedback.textContent = data.error || `Error ${resp.status}`;
+      feedback.className = 'config-feedback err';
+    }
+  } catch(e) {
+    feedback.textContent = 'Network error';
+    feedback.className = 'config-feedback err';
+  }
 }
 
 function onAuthTypeChange() {

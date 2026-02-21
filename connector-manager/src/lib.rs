@@ -78,6 +78,7 @@ pub mod api;
 pub mod connectors;
 pub mod generic_config;
 pub mod manager;
+pub mod named_config;
 pub mod registry;
 pub mod runners;
 

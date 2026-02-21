@@ -143,17 +143,13 @@ These were in early design docs but deemed unnecessary (2026-02-14):
 - [x] Phase 2: GitHub connector (validated in production)
 - [ ] Phase 3+: Superseded by ADR-007
 
-### ADR-007: Universal Connector Framework (IN PROGRESS 🔧 2026-02-21)
+### ADR-007: Universal Connector Framework (COMPLETE ✅ 2026-02-21)
 - [x] Connector-manager refactor: builtin/generic/named runner modules separated (runners/)
 - [x] ConnectorType enum added to types.rs
-- [x] Phase 3A Task 1: Generic config storage (GenericConfigStore, AuthType, SQLite)
-- [x] Phase 3A Task 2: Bento runner (subprocess spawning, YAML template rendering)
-- [x] Phase 3A Task 3: API endpoints (POST /api/connectors/generic, DELETE, GET /api/connectors)
-- [x] Phase 3A Task 4: UI form (Add Generic Source, proxy in server.js)
-- [x] Phase 3A Bugfixes: rate_limit_resources interval, formatValue nested objects/arrays, UI rebuild
-- [x] Phase 3A Tested: no-auth (CoinGecko, httpbin), bearer (Polygon), API key header (Brave Search)
-- [ ] Phase 3B: Named connector (Singer taps)
-- [ ] Phase 3C: Polish (webhooks, error alerting, manual trigger)
+- [x] Phase 3A: Generic (Bento) connector — config storage, runner, API, UI, tested in production
+- [x] Phase 3B: Named (Singer) connector — tap catalog, NamedRunner, SQLite config, API, UI
+- [x] Phase 3C: Auto-install taps (pip + --break-system-packages), manual sync trigger
+- [x] Bugfixes: rate_limit_resources, --properties vs --catalog, stream name sanitization, Bento port 4195, Ubuntu 24.04 pip
 
 ---
 

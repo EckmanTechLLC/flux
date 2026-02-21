@@ -1,13 +1,16 @@
 //! Connector Manager HTTP API — generic connector endpoints.
 //!
-//! Exposes three routes:
+//! Exposes four routes:
 //! - `POST /api/connectors/generic` — create a new generic (Bento) source
 //! - `DELETE /api/connectors/generic/:source_id` — remove a generic source
-//! - `GET /api/connectors` — list all connectors (builtin + generic)
+//! - `GET /api/connectors` — list all connectors (builtin + generic + named)
+//! - `GET /api/connectors/taps` — return the Meltano Hub tap catalog
 
 use crate::generic_config::{AuthType, GenericConfigStore, GenericSourceConfig};
+use crate::named_config::NamedSourceConfig;
 use crate::registry::get_all_connectors;
 use crate::runners::generic::GenericRunner;
+use crate::runners::named::{NamedRunner, TapCatalogEntry, TapCatalogStore};
 use anyhow::Result;
 use axum::{
     extract::{Path, State},
@@ -28,6 +31,8 @@ pub struct ApiState {
     pub config_store: Arc<GenericConfigStore>,
     pub runner: Arc<GenericRunner>,
     pub credential_store: Arc<CredentialStore>,
+    pub tap_catalog: Arc<TapCatalogStore>,
+    pub named_runner: Arc<NamedRunner>,
 }
 
 /// Auth type as received in the API request body.
@@ -72,6 +77,23 @@ pub struct CreateGenericSourceRequest {
 /// Response for `POST /api/connectors/generic`.
 #[derive(Serialize)]
 pub struct CreateGenericSourceResponse {
+    pub source_id: String,
+}
+
+/// Request body for `POST /api/connectors/named`.
+#[derive(Deserialize)]
+pub struct CreateNamedSourceRequest {
+    pub tap_name: String,
+    pub namespace: String,
+    pub entity_key_field: String,
+    /// Tap configuration JSON (credentials + settings).
+    pub config_json: String,
+    pub poll_interval_secs: u64,
+}
+
+/// Response for `POST /api/connectors/named`.
+#[derive(Serialize)]
+pub struct CreateNamedSourceResponse {
     pub source_id: String,
 }
 
@@ -143,6 +165,49 @@ pub async fn handle_create_generic_source(
     Ok(source_id)
 }
 
+/// Creates and starts a new named Singer tap source.
+///
+/// Generates a UUIDv4 source ID, persists the config in `NamedConfigStore`,
+/// and starts the Singer subprocess via `NamedRunner`.
+pub async fn handle_create_named_source(
+    state: &ApiState,
+    req: CreateNamedSourceRequest,
+) -> Result<String> {
+    let source_id = uuid::Uuid::new_v4().to_string();
+    let config = NamedSourceConfig {
+        id: source_id.clone(),
+        tap_name: req.tap_name,
+        namespace: req.namespace,
+        entity_key_field: req.entity_key_field,
+        config_json: req.config_json,
+        poll_interval_secs: req.poll_interval_secs,
+        created_at: Utc::now(),
+    };
+    state.named_runner.store.insert(&config)?;
+    state.named_runner.start_source(&config).await?;
+    info!(source_id = %source_id, tap = %config.tap_name, "Named source created");
+    Ok(source_id)
+}
+
+/// Triggers an immediate one-shot sync for a named Singer tap source.
+///
+/// Fire-and-forget: returns `Ok(())` as soon as the background task is spawned.
+/// Returns `Err` if the source is not found.
+pub async fn handle_sync_named_source(state: &ApiState, source_id: &str) -> Result<()> {
+    state.named_runner.trigger_sync(source_id).await
+}
+
+/// Stops and removes a named Singer tap source.
+///
+/// Aborts the background task, deletes the config from SQLite, and removes
+/// any temp files for the source.
+pub async fn handle_delete_named_source(state: &ApiState, source_id: &str) -> Result<()> {
+    state.named_runner.stop_source(source_id).await?;
+    state.named_runner.store.delete(source_id)?;
+    info!(source_id = %source_id, "Named source deleted");
+    Ok(())
+}
+
 /// Stops and removes a generic source.
 ///
 /// Kills the Bento subprocess, deletes the config from SQLite, and removes
@@ -159,6 +224,39 @@ pub async fn handle_delete_generic_source(state: &ApiState, source_id: &str) -> 
 // ---------------------------------------------------------------------------
 // HTTP handlers
 // ---------------------------------------------------------------------------
+
+async fn post_named_source(
+    State(state): State<Arc<ApiState>>,
+    Json(req): Json<CreateNamedSourceRequest>,
+) -> Result<(StatusCode, Json<CreateNamedSourceResponse>), AppError> {
+    let source_id = handle_create_named_source(&state, req)
+        .await
+        .map_err(AppError::from)?;
+    Ok((
+        StatusCode::CREATED,
+        Json(CreateNamedSourceResponse { source_id }),
+    ))
+}
+
+async fn delete_named_source(
+    State(state): State<Arc<ApiState>>,
+    Path(source_id): Path<String>,
+) -> Result<StatusCode, AppError> {
+    handle_delete_named_source(&state, &source_id)
+        .await
+        .map_err(AppError::from)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn post_sync_named_source(
+    State(state): State<Arc<ApiState>>,
+    Path(source_id): Path<String>,
+) -> Result<StatusCode, AppError> {
+    handle_sync_named_source(&state, &source_id)
+        .await
+        .map_err(AppError::from)?;
+    Ok(StatusCode::ACCEPTED)
+}
 
 async fn post_generic_source(
     State(state): State<Arc<ApiState>>,
@@ -231,7 +329,43 @@ async fn list_connectors(State(state): State<Arc<ApiState>>) -> Json<Vec<Connect
         });
     }
 
+    // Named connectors from config store + runner status
+    let named_configs = state.named_runner.store.list().unwrap_or_else(|e| {
+        warn!(error = %e, "Failed to list named source configs");
+        vec![]
+    });
+    let named_statuses = state.named_runner.status();
+
+    for config in named_configs {
+        let status_entry = named_statuses.iter().find(|s| s.source_id == config.id);
+        let (status, last_started, last_error) = match status_entry {
+            Some(s) => {
+                let st = if s.last_error.is_some() { "error" } else { "running" };
+                (
+                    st.to_string(),
+                    s.last_run.map(|dt| dt.to_rfc3339()),
+                    s.last_error.clone(),
+                )
+            }
+            None => ("stopped".to_string(), None, None),
+        };
+
+        connectors.push(ConnectorInfo {
+            name: config.tap_name,
+            connector_type: "named".to_string(),
+            enabled: true,
+            status,
+            source_id: Some(config.id),
+            last_started,
+            last_error,
+        });
+    }
+
     Json(connectors)
+}
+
+async fn get_tap_catalog(State(state): State<Arc<ApiState>>) -> Json<Vec<TapCatalogEntry>> {
+    Json(state.tap_catalog.list())
 }
 
 // ---------------------------------------------------------------------------
@@ -265,12 +399,22 @@ impl IntoResponse for AppError {
 
 pub fn create_router(state: ApiState) -> Router {
     Router::new()
+        .route("/api/connectors/named", post(post_named_source))
+        .route(
+            "/api/connectors/named/:source_id",
+            delete(delete_named_source),
+        )
+        .route(
+            "/api/connectors/named/:source_id/sync",
+            post(post_sync_named_source),
+        )
         .route("/api/connectors/generic", post(post_generic_source))
         .route(
             "/api/connectors/generic/:source_id",
             delete(delete_generic_source),
         )
         .route("/api/connectors", get(list_connectors))
+        .route("/api/connectors/taps", get(get_tap_catalog))
         .with_state(Arc::new(state))
 }
 
@@ -281,9 +425,11 @@ pub fn create_router(state: ApiState) -> Router {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::named_config::NamedConfigStore;
 
     fn make_state() -> ApiState {
         let config_store = Arc::new(GenericConfigStore::new(":memory:").unwrap());
+        let named_store = Arc::new(NamedConfigStore::new(":memory:").unwrap());
         let credential_store = Arc::new(
             CredentialStore::new(":memory:", &base64::encode([0u8; 32])).unwrap(),
         );
@@ -291,10 +437,17 @@ mod tests {
             Arc::clone(&config_store),
             "http://localhost:3000".to_string(),
         ));
+        let named_runner = Arc::new(NamedRunner::new(
+            Arc::clone(&named_store),
+            "http://localhost:3000".to_string(),
+        ));
+        let tap_catalog = Arc::new(TapCatalogStore::new("/nonexistent/test-catalog.json"));
         ApiState {
             config_store,
             runner,
             credential_store,
+            tap_catalog,
+            named_runner,
         }
     }
 
@@ -308,6 +461,49 @@ mod tests {
             auth_type: AuthTypeInput::Plain("none".to_string()),
             token: None,
         }
+    }
+
+    fn make_named_request(tap: &str) -> CreateNamedSourceRequest {
+        CreateNamedSourceRequest {
+            tap_name: tap.to_string(),
+            namespace: "personal".to_string(),
+            entity_key_field: "id".to_string(),
+            config_json: r#"{"access_token": "ghp_test"}"#.to_string(),
+            poll_interval_secs: 3600,
+        }
+    }
+
+    #[tokio::test]
+    async fn test_post_named_source_stores_config() {
+        let state = make_state();
+        let source_id = handle_create_named_source(&state, make_named_request("tap-github"))
+            .await
+            .unwrap();
+
+        let stored = state.named_runner.store.get(&source_id).unwrap();
+        assert!(stored.is_some(), "config should be stored after POST");
+        let config = stored.unwrap();
+        assert_eq!(config.tap_name, "tap-github");
+        assert_eq!(config.namespace, "personal");
+        assert_eq!(config.entity_key_field, "id");
+        assert_eq!(config.poll_interval_secs, 3600);
+    }
+
+    #[tokio::test]
+    async fn test_delete_named_source_removes_config() {
+        let state = make_state();
+        let source_id = handle_create_named_source(&state, make_named_request("tap-github"))
+            .await
+            .unwrap();
+        assert!(
+            state.named_runner.store.get(&source_id).unwrap().is_some(),
+            "config should exist before delete"
+        );
+
+        handle_delete_named_source(&state, &source_id).await.unwrap();
+
+        let stored = state.named_runner.store.get(&source_id).unwrap();
+        assert!(stored.is_none(), "config should be removed after DELETE");
     }
 
     #[tokio::test]

@@ -145,7 +145,10 @@ pub fn render_bento_config(config: &GenericSourceConfig, flux_api_url: &str) -> 
     };
 
     format!(
-        r#"input:
+        r#"http:
+  enabled: false
+
+input:
   http_client:
     url: {url}
     verb: GET
