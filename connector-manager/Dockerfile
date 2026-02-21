@@ -8,7 +8,7 @@ WORKDIR /app
 COPY Cargo.toml Cargo.lock ./
 
 # Copy connector-manager crate manifests
-COPY connector-manager/Cargo.toml connector-manager/Cargo.lock ./connector-manager/
+COPY connector-manager/Cargo.toml ./connector-manager/
 
 # Copy source code
 COPY src ./src
