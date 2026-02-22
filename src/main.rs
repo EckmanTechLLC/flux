@@ -1,10 +1,10 @@
 use anyhow::Result;
 use axum::Router;
 use flux::api::{
-    create_admin_router, create_connector_router, create_deletion_router,
+    create_admin_router, create_connector_router, create_deletion_router, create_history_router,
     create_namespace_router, create_oauth_router, create_query_router, create_router,
     create_ws_router, run_state_cleanup, AdminAppState, AppState, ConnectorAppState,
-    DeletionAppState, OAuthAppState, QueryAppState, StateManager, WsAppState,
+    DeletionAppState, HistoryAppState, OAuthAppState, QueryAppState, StateManager, WsAppState,
 };
 use flux::rate_limit::RateLimiter;
 use flux::config;
@@ -192,6 +192,12 @@ async fn main() -> Result<()> {
     let query_state = Arc::new(QueryAppState { state_engine });
     let query_router = create_query_router(query_state);
 
+    // Create History API router
+    let history_state = Arc::new(HistoryAppState {
+        jetstream: nats_client.jetstream().clone(),
+    });
+    let history_router = create_history_router(history_state);
+
     // Create Connector API router
     let connector_state = ConnectorAppState {
         credential_store: credential_store.clone(),
@@ -245,6 +251,7 @@ async fn main() -> Result<()> {
         .merge(deletion_router)
         .merge(ws_router)
         .merge(query_router)
+        .merge(history_router)
         .merge(connector_router)
         .merge(oauth_router)
         .merge(admin_router);
