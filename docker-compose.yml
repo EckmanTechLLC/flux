@@ -34,6 +34,7 @@ services:
       - FLUX_OAUTH_CALLBACK_BASE_URL=${FLUX_OAUTH_CALLBACK_BASE_URL}
       - FLUX_AUTH_ENABLED=${FLUX_AUTH_ENABLED}
       - FLUX_ADMIN_TOKEN=${FLUX_ADMIN_TOKEN}
+      - FLUX_NAMESPACE_DB=/data/namespaces.db
     volumes:
       - ./data:/data
     ports:

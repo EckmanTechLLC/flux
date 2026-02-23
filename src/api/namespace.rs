@@ -159,6 +159,10 @@ impl IntoResponse for NamespaceError {
                     StatusCode::CONFLICT,
                     "Namespace name already exists".to_string(),
                 ),
+                RegistrationError::StoreFailed => (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to persist namespace".to_string(),
+                ),
             },
         };
 

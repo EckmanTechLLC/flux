@@ -11,7 +11,7 @@ use flux::rate_limit::RateLimiter;
 use flux::config;
 use flux::config::new_runtime_config;
 use flux::credentials::CredentialStore;
-use flux::namespace::NamespaceRegistry;
+use flux::namespace::{NamespaceRegistry, NamespaceStore};
 use flux::nats::{EventPublisher, NatsClient};
 use flux::snapshot::{manager::SnapshotManager, recovery};
 use flux::state::StateEngine;
@@ -125,8 +125,19 @@ async fn main() -> Result<()> {
 
     info!("Auth enabled: {}", auth_enabled);
 
-    // Create namespace registry (for auth mode)
-    let namespace_registry = Arc::new(NamespaceRegistry::new());
+    // Initialize namespace store (persists registrations across restarts)
+    let ns_db_path = std::env::var("FLUX_NAMESPACE_DB")
+        .unwrap_or_else(|_| "namespaces.db".to_string());
+    let namespace_registry = Arc::new(match NamespaceStore::new(&ns_db_path) {
+        Ok(store) => {
+            info!("Namespace store initialized at {}", ns_db_path);
+            NamespaceRegistry::new_persistent(store)
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "Failed to initialize namespace store, using in-memory only");
+            NamespaceRegistry::new()
+        }
+    });
 
     // Initialize credential store (for connector framework)
     let credential_store = std::env::var("FLUX_ENCRYPTION_KEY")

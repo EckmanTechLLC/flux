@@ -4,6 +4,9 @@ use rand::Rng;
 use std::sync::Arc;
 use uuid::Uuid;
 
+pub mod store;
+pub use store::NamespaceStore;
+
 #[cfg(test)]
 mod tests;
 
@@ -30,16 +33,44 @@ pub struct NamespaceRegistry {
     names: Arc<DashMap<String, String>>,
     /// Secondary index: token -> namespace_id (for auth)
     tokens: Arc<DashMap<String, String>>,
+    /// Optional SQLite-backed persistence
+    store: Option<NamespaceStore>,
 }
 
 impl NamespaceRegistry {
-    /// Create new empty registry
+    /// Create new empty registry (no persistence)
     pub fn new() -> Self {
         Self {
             namespaces: Arc::new(DashMap::new()),
             names: Arc::new(DashMap::new()),
             tokens: Arc::new(DashMap::new()),
+            store: None,
         }
+    }
+
+    /// Create registry backed by a persistent store, loading existing namespaces.
+    pub fn new_persistent(store: NamespaceStore) -> Self {
+        let registry = Self {
+            namespaces: Arc::new(DashMap::new()),
+            names: Arc::new(DashMap::new()),
+            tokens: Arc::new(DashMap::new()),
+            store: Some(store),
+        };
+        if let Some(ref s) = registry.store {
+            match s.load_all() {
+                Ok(namespaces) => {
+                    for ns in namespaces {
+                        registry.names.insert(ns.name.clone(), ns.id.clone());
+                        registry.tokens.insert(ns.token.clone(), ns.id.clone());
+                        registry.namespaces.insert(ns.id.clone(), ns);
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, "Failed to load namespaces from store");
+                }
+            }
+        }
+        registry
     }
 
     /// Register a new namespace with given name
@@ -68,6 +99,11 @@ impl NamespaceRegistry {
             created_at: now,
             entity_count: 0,
         };
+
+        // Persist first (fail fast if DB write fails)
+        if let Some(ref store) = self.store {
+            store.insert(&namespace).map_err(|_| RegistrationError::StoreFailed)?;
+        }
 
         // Insert into all indices
         self.namespaces
@@ -173,6 +209,7 @@ fn generate_namespace_id() -> String {
 pub enum RegistrationError {
     InvalidName(ValidationError),
     NameAlreadyExists,
+    StoreFailed,
 }
 
 impl From<ValidationError> for RegistrationError {
