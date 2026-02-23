@@ -181,11 +181,9 @@ async fn main() -> Result<()> {
     };
     let deletion_router = create_deletion_router(deletion_state);
 
-    // Create WebSocket API router (with auth middleware)
+    // Create WebSocket API router (no auth — WS is read-only)
     let ws_state = Arc::new(WsAppState {
         state_engine: Arc::clone(&state_engine),
-        namespace_registry: Arc::clone(&namespace_registry),
-        auth_enabled,
     });
     let ws_router = create_ws_router(ws_state);
 
