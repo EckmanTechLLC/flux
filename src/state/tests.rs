@@ -59,6 +59,7 @@ fn test_multiple_updates_to_same_entity() {
 #[test]
 fn test_state_updates_broadcast_correctly() {
     let engine = StateEngine::new();
+    engine.set_live();
     let mut rx = engine.subscribe();
 
     // Update property (should broadcast)
@@ -355,6 +356,7 @@ fn test_consumer_delivery_with_snapshot_resumes_from_next_sequence() {
 #[test]
 fn test_deletion_broadcast() {
     let engine = Arc::new(StateEngine::new());
+    engine.set_live();
 
     // Subscribe to deletions
     let mut deletion_rx = engine.subscribe_deletions();

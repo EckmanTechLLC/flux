@@ -8,7 +8,7 @@ use dashmap::DashMap;
 use futures::StreamExt;
 use serde_json::Value;
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use tokio::sync::broadcast;
 use tracing::{error, info, warn};
@@ -26,6 +26,9 @@ pub struct StateEngine {
 
     /// Last processed NATS sequence number
     last_processed_sequence: AtomicU64,
+
+    /// True during NATS replay on startup; broadcasts are suppressed
+    replaying: AtomicBool,
 
     /// Metrics tracker for monitoring
     pub metrics: MetricsTracker,
@@ -46,6 +49,7 @@ impl StateEngine {
             state_tx,
             deletion_tx,
             last_processed_sequence: AtomicU64::new(0),
+            replaying: AtomicBool::new(true),
             metrics: MetricsTracker::new(),
             metrics_tx,
         }
@@ -86,8 +90,10 @@ impl StateEngine {
             timestamp: now,
         };
 
-        // Broadcast to subscribers
-        let _ = self.state_tx.send(update.clone());
+        // Broadcast to subscribers (suppressed during NATS replay)
+        if !self.replaying.load(Ordering::Relaxed) {
+            let _ = self.state_tx.send(update.clone());
+        }
 
         update
     }
@@ -123,12 +129,14 @@ impl StateEngine {
         let removed = self.entities.remove(entity_id).map(|(_, entity)| entity);
 
         if removed.is_some() {
-            // Broadcast deletion event
-            let deletion = EntityDeleted {
-                entity_id: entity_id.to_string(),
-                timestamp: Utc::now(),
-            };
-            let _ = self.deletion_tx.send(deletion);
+            // Broadcast deletion event (suppressed during NATS replay)
+            if !self.replaying.load(Ordering::Relaxed) {
+                let deletion = EntityDeleted {
+                    entity_id: entity_id.to_string(),
+                    timestamp: Utc::now(),
+                };
+                let _ = self.deletion_tx.send(deletion);
+            }
 
             info!(entity_id = %entity_id, "Entity deleted");
         }
@@ -139,6 +147,12 @@ impl StateEngine {
     /// Get last processed NATS sequence number
     pub fn get_last_processed_sequence(&self) -> u64 {
         self.last_processed_sequence.load(Ordering::SeqCst)
+    }
+
+    /// Signal that NATS replay is complete; enable state broadcasting
+    pub fn set_live(&self) {
+        self.replaying.store(false, Ordering::SeqCst);
+        info!("State engine live — broadcasting enabled");
     }
 
     /// Load state from snapshot
@@ -302,10 +316,35 @@ impl StateEngine {
 
         info!("State engine consumer created, processing events...");
 
-        // Process messages
+        // Process messages.
+        // During replay, use a 500 ms idle timeout: if no message arrives within
+        // that window we assume the backlog is drained and we're at the live tail.
         let mut messages = consumer.messages().await?;
 
-        while let Some(msg) = messages.next().await {
+        loop {
+            let next = if self.replaying.load(Ordering::Relaxed) {
+                match tokio::time::timeout(
+                    std::time::Duration::from_millis(500),
+                    messages.next(),
+                )
+                .await
+                {
+                    Ok(opt) => opt,
+                    Err(_) => {
+                        // 500 ms elapsed with no message — replay complete
+                        self.set_live();
+                        messages.next().await
+                    }
+                }
+            } else {
+                messages.next().await
+            };
+
+            let msg = match next {
+                Some(m) => m,
+                None => break,
+            };
+
             match msg {
                 Ok(msg) => {
                     // Extract NATS sequence number
@@ -350,5 +389,93 @@ impl StateEngine {
 impl Default for StateEngine {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn make_event(entity_id: &str, prop: &str, val: serde_json::Value) -> FluxEvent {
+        FluxEvent {
+            event_id: Some("test-event-id".to_string()),
+            stream: "test".to_string(),
+            source: "test-source".to_string(),
+            timestamp: 1_000_000,
+            key: None,
+            schema: None,
+            payload: json!({
+                "entity_id": entity_id,
+                "properties": { prop: val }
+            }),
+        }
+    }
+
+    #[test]
+    fn broadcast_suppressed_during_replay() {
+        let engine = StateEngine::new();
+        let mut rx = engine.subscribe();
+
+        // replaying=true by default — broadcast should be suppressed
+        let event = make_event("ent/a", "foo", json!(42));
+        engine.process_event(&event);
+
+        // Entity state was updated
+        assert_eq!(
+            engine.get_entity("ent/a").unwrap().properties["foo"],
+            json!(42)
+        );
+        // No broadcast sent
+        assert!(matches!(
+            rx.try_recv(),
+            Err(tokio::sync::broadcast::error::TryRecvError::Empty)
+        ));
+    }
+
+    #[test]
+    fn broadcast_resumes_after_set_live() {
+        let engine = StateEngine::new();
+        let mut rx = engine.subscribe();
+
+        engine.set_live();
+
+        let event = make_event("ent/b", "bar", json!("hello"));
+        engine.process_event(&event);
+
+        // Broadcast should now be delivered
+        assert!(rx.try_recv().is_ok());
+    }
+
+    #[test]
+    fn deletion_suppressed_during_replay() {
+        let engine = StateEngine::new();
+        let mut del_rx = engine.subscribe_deletions();
+
+        // Insert entity first (update_property also suppressed, but entity state is written)
+        engine.update_property("ent/c", "x", json!(1));
+
+        // Attempt deletion during replay
+        engine.delete_entity("ent/c");
+
+        // Entity removed from state
+        assert!(engine.get_entity("ent/c").is_none());
+        // No deletion broadcast
+        assert!(matches!(
+            del_rx.try_recv(),
+            Err(tokio::sync::broadcast::error::TryRecvError::Empty)
+        ));
+    }
+
+    #[test]
+    fn deletion_broadcast_after_set_live() {
+        let engine = StateEngine::new();
+        engine.set_live();
+        let mut del_rx = engine.subscribe_deletions();
+
+        engine.update_property("ent/d", "x", json!(1));
+        engine.delete_entity("ent/d");
+
+        assert!(del_rx.try_recv().is_ok());
     }
 }
