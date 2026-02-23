@@ -133,7 +133,7 @@ These were in early design docs but deemed unnecessary (2026-02-14):
 - [x] Runtime config + Admin API
 - [x] Body size limits
 - [x] Rate limiting (token bucket, per-namespace)
-- [x] WebSocket auth
+- [x] WebSocket auth — REMOVED 2026-02-23 (WS is read-only, must stay open)
 - [x] Admin Config UI panel
 
 ### Bugfix: NATS durable consumer replay (2026-02-20)
