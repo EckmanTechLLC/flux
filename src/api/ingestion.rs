@@ -23,6 +23,7 @@ pub struct AppState {
     pub event_publisher: EventPublisher,
     pub namespace_registry: Arc<NamespaceRegistry>,
     pub auth_enabled: bool,
+    pub admin_token: Option<String>,
     pub runtime_config: SharedRuntimeConfig,
     pub rate_limiter: Arc<RateLimiter>,
 }

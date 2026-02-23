@@ -92,7 +92,7 @@ pub fn authorize_event(
     registry.validate_token(&token, &namespace).map_err(|e| {
         match e {
             NamespaceAuthError::NamespaceNotFound => {
-                AuthError::NamespaceNotFound(format!("Namespace '{}' not found", namespace))
+                AuthError::NamespaceNotFound(format!("Namespace '{}' not found. Get a namespace at flux-universe.com", namespace))
             }
             NamespaceAuthError::Unauthorized => AuthError::Forbidden(format!(
                 "Token does not have permission to write to namespace '{}'",

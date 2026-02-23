@@ -142,9 +142,11 @@ async fn run_bento_loop(
             }
             Err(e) => {
                 error!(source_id = %config.id, error = %e, "Failed to spawn bento — retrying in 5s");
-                let mut map = status_map.lock().unwrap();
-                if let Some(s) = map.get_mut(&config.id) {
-                    s.last_error = Some(e.to_string());
+                {
+                    let mut map = status_map.lock().unwrap();
+                    if let Some(s) = map.get_mut(&config.id) {
+                        s.last_error = Some(e.to_string());
+                    }
                 }
                 tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
                 continue;

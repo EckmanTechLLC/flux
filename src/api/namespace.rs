@@ -2,7 +2,7 @@ use crate::api::AppState;
 use crate::namespace::{RegistrationError, ValidationError};
 use axum::{
     extract::{Path, State},
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     response::{IntoResponse, Json, Response},
     routing::{get, post},
     Router,
@@ -55,11 +55,23 @@ pub fn create_namespace_router(state: AppState) -> Router {
 /// POST /api/namespaces - Register new namespace
 async fn register_namespace(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Json(request): Json<RegisterRequest>,
 ) -> Result<Json<RegisterResponse>, NamespaceError> {
     // Check if auth is enabled
     if !state.auth_enabled {
         return Err(NamespaceError::AuthDisabled);
+    }
+
+    // Require admin token if configured
+    if let Some(ref expected) = state.admin_token {
+        let provided = headers
+            .get("Authorization")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.strip_prefix("Bearer "));
+        if provided != Some(expected.as_str()) {
+            return Err(NamespaceError::Unauthorized);
+        }
     }
 
     info!(name = %request.name, "Registering namespace");
@@ -110,6 +122,7 @@ async fn lookup_namespace(
 /// Namespace API error types
 enum NamespaceError {
     AuthDisabled,
+    Unauthorized,
     NotFound,
     Registration(RegistrationError),
 }
@@ -120,6 +133,10 @@ impl IntoResponse for NamespaceError {
             NamespaceError::AuthDisabled => (
                 StatusCode::NOT_FOUND,
                 "Namespace registration not available (auth disabled)".to_string(),
+            ),
+            NamespaceError::Unauthorized => (
+                StatusCode::UNAUTHORIZED,
+                "Admin token required".to_string(),
             ),
             NamespaceError::NotFound => (
                 StatusCode::NOT_FOUND,
@@ -168,11 +185,15 @@ mod tests {
 
     async fn create_test_publisher() -> EventPublisher {
         // Create a test NATS client - won't actually connect in tests
-        let client = async_nats::connect("nats://localhost:4222").await.unwrap();
+        let client = async_nats::connect("nats://localhost:4223").await.unwrap();
         EventPublisher::new(async_nats::jetstream::new(client))
     }
 
     async fn create_test_app(auth_enabled: bool) -> Router {
+        create_test_app_with_token(auth_enabled, None).await
+    }
+
+    async fn create_test_app_with_token(auth_enabled: bool, admin_token: Option<String>) -> Router {
         let namespace_registry = Arc::new(NamespaceRegistry::new());
         let event_publisher = create_test_publisher().await;
 
@@ -180,6 +201,7 @@ mod tests {
             event_publisher,
             namespace_registry,
             auth_enabled,
+            admin_token,
             runtime_config: new_runtime_config(),
             rate_limiter: Arc::new(RateLimiter::new()),
         };
@@ -264,6 +286,7 @@ mod tests {
             event_publisher: event_publisher1,
             namespace_registry: Arc::clone(&namespace_registry),
             auth_enabled: true,
+            admin_token: None,
             runtime_config: new_runtime_config(),
             rate_limiter: Arc::new(RateLimiter::new()),
         };
@@ -274,6 +297,7 @@ mod tests {
             event_publisher: event_publisher2,
             namespace_registry: Arc::clone(&namespace_registry),
             auth_enabled: true,
+            admin_token: None,
             runtime_config: new_runtime_config(),
             rate_limiter: Arc::new(RateLimiter::new()),
         };
@@ -313,6 +337,7 @@ mod tests {
             event_publisher,
             namespace_registry,
             auth_enabled: true,
+            admin_token: None,
             runtime_config: new_runtime_config(),
             rate_limiter: Arc::new(RateLimiter::new()),
         };
@@ -377,6 +402,7 @@ mod tests {
             event_publisher,
             namespace_registry,
             auth_enabled: true,
+            admin_token: None,
             runtime_config: new_runtime_config(),
             rate_limiter: Arc::new(RateLimiter::new()),
         };
@@ -397,5 +423,37 @@ mod tests {
 
         // Token should NOT be in the response
         assert!(!body_str.contains(&token));
+    }
+
+    #[tokio::test]
+    async fn test_register_namespace_requires_admin_token() {
+        let app = create_test_app_with_token(true, Some("secret".to_string())).await;
+
+        // No Authorization header
+        let request = Request::builder()
+            .method("POST")
+            .uri("/api/namespaces")
+            .header("content-type", "application/json")
+            .body(Body::from(json!({"name": "matt"}).to_string()))
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn test_register_namespace_accepts_admin_token() {
+        let app = create_test_app_with_token(true, Some("secret".to_string())).await;
+
+        let request = Request::builder()
+            .method("POST")
+            .uri("/api/namespaces")
+            .header("content-type", "application/json")
+            .header("Authorization", "Bearer secret")
+            .body(Body::from(json!({"name": "matt"}).to_string()))
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
     }
 }

@@ -162,6 +162,7 @@ async fn main() -> Result<()> {
         event_publisher: event_publisher.clone(),
         namespace_registry: Arc::clone(&namespace_registry),
         auth_enabled,
+        admin_token: admin_token.clone(),
         runtime_config: Arc::clone(&runtime_config),
         rate_limiter,
     };
