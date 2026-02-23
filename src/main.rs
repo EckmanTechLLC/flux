@@ -1,5 +1,6 @@
 use anyhow::Result;
 use axum::Router;
+use tower_http::cors::{Any, CorsLayer};
 use flux::api::{
     create_admin_router, create_connector_router, create_deletion_router, create_history_router,
     create_namespace_router, create_oauth_router, create_query_router, create_router,
@@ -244,6 +245,20 @@ async fn main() -> Result<()> {
     };
     let admin_router = create_admin_router(admin_state);
 
+    // CORS — allow browsers (flux-universe.com explorer) to fetch from Flux
+    let cors = CorsLayer::new()
+        .allow_origin(Any)
+        .allow_methods([
+            axum::http::Method::GET,
+            axum::http::Method::POST,
+            axum::http::Method::DELETE,
+            axum::http::Method::OPTIONS,
+        ])
+        .allow_headers([
+            axum::http::header::AUTHORIZATION,
+            axum::http::header::CONTENT_TYPE,
+        ]);
+
     // Combine routers
     let app = ingestion_router
         .merge(namespace_router)
@@ -253,7 +268,8 @@ async fn main() -> Result<()> {
         .merge(history_router)
         .merge(connector_router)
         .merge(oauth_router)
-        .merge(admin_router);
+        .merge(admin_router)
+        .layer(cors);
 
     let addr = format!("0.0.0.0:{}", port);
     info!("Starting HTTP server on {}", addr);
