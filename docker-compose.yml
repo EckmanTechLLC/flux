@@ -83,7 +83,8 @@ services:
       - FLUX_API_URL=http://flux:3000
       - FLUX_ENCRYPTION_KEY=${FLUX_ENCRYPTION_KEY}
       - FLUX_CREDENTIALS_DB=/data/credentials.db
-      - GENERIC_CONFIG_DB=${GENERIC_CONFIG_DB}
+      - GENERIC_CONFIG_DB=/data/generic_config.db
+      - NAMED_CONFIG_DB=/data/named_config.db
     volumes:
       - ./data:/data
     networks:
