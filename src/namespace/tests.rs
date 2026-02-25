@@ -209,6 +209,28 @@ fn test_namespace_id_format() {
 }
 
 #[test]
+fn test_delete_existing_removes_from_all_maps() {
+    let registry = NamespaceRegistry::new();
+    let ns = registry.register("matt").unwrap();
+    let ns_id = ns.id.clone();
+    let token = ns.token.clone();
+
+    let deleted = registry.delete("matt");
+    assert!(deleted);
+
+    assert!(registry.lookup_by_name("matt").is_none());
+    assert!(registry.lookup_by_token(&token).is_none());
+    assert!(registry.get(&ns_id).is_none());
+    assert_eq!(registry.count(), 0);
+}
+
+#[test]
+fn test_delete_unknown_returns_false() {
+    let registry = NamespaceRegistry::new();
+    assert!(!registry.delete("nonexistent"));
+}
+
+#[test]
 fn test_multiple_namespaces_unique_ids() {
     let registry = NamespaceRegistry::new();
 

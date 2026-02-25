@@ -51,6 +51,14 @@ impl NamespaceStore {
         Ok(())
     }
 
+    /// Deletes a namespace by name. Returns Ok(()) whether or not the row exists.
+    pub fn delete(&self, name: &str) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute("DELETE FROM namespaces WHERE name = ?1", params![name])
+            .context("Failed to delete namespace")?;
+        Ok(())
+    }
+
     /// Returns all persisted namespaces ordered by creation time.
     pub fn load_all(&self) -> Result<Vec<Namespace>> {
         let conn = self.conn.lock().unwrap();
@@ -157,6 +165,26 @@ mod tests {
             .unwrap();
         let result = store.insert(&sample_namespace("ns_bbbbbbbb", "myspace"));
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_delete_existing() {
+        let store = in_memory_store();
+        store
+            .insert(&sample_namespace("ns_aaaaaaaa", "myspace"))
+            .unwrap();
+
+        store.delete("myspace").expect("delete should succeed");
+
+        let loaded = store.load_all().expect("load_all failed");
+        assert!(loaded.is_empty());
+    }
+
+    #[test]
+    fn test_delete_nonexistent_is_ok() {
+        let store = in_memory_store();
+        let result = store.delete("nonexistent");
+        assert!(result.is_ok());
     }
 
     #[test]

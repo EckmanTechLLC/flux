@@ -91,12 +91,33 @@ These were in early design docs but deemed unnecessary (2026-02-14):
 - **Advanced queries** - Would violate domain-agnostic design principle
 
 **Deployment Status:**
-- Private test instance on etl-bot (Cloudflare tunnel + systemd, contact for access)
-- Public endpoint: https://flux.eckman-tech.com
-- UI running at http://localhost:8082
-- 7 VMs publishing system metrics
+- Dev instance: /home/etl/projects/flux (Docker Compose, local)
+- Public instance: 192.168.50.107 at /home/etl/flux (Docker Compose via systemd flux.service)
+  - FLUX_AUTH_ENABLED=true, FLUX_ADMIN_TOKEN set in .env
+  - Cloudflare + public domain NOT yet configured
+  - flux-monitor.service running (Python, monitors Flux health)
+- Legacy: etl-bot instance being retired (was https://flux.eckman-tech.com)
 - OpenClaw skill published to ClawHub registry (flux@1.0.0)
-- Arc agent coordinating through Flux on etl-bot
+
+**Public Instance (.107) Live Namespaces:**
+- flux-iss: ISS position, details, crew
+- flux-weather: 6 cities (new-york, london, tokyo, sydney, dubai, los-angeles)
+- flux-crypto: bitcoin, ethereum, solana, bnb, xrp
+- flux-stocks: AAPL, TSLA, NVDA, MSFT, SPY (Polygon prev-day OHLCV)
+
+**Connector Auth Fix (2026-02-25):**
+- Generic (Bento) and Named (Singer) runners now pass flux_namespace_token as
+  Authorization: Bearer to Flux API — required for auth-enabled instances
+- GENERIC_CONFIG_DB and NAMED_CONFIG_DB hardcoded to /data/ in docker-compose.yml
+
+**ADR-009: Stripe Provisioner (Approved, not yet built)**
+- Private Python/Flask service on .107 at /home/etl/flux-provisioner/ port 3002
+- pay.flux-universe.com → Cloudflare tunnel → localhost:3002
+- Stripe webhook → provision namespace → SMTP2GO email → SQLite storage
+- Word-pair namespace names (amber-river, swift-pine, etc.)
+- Admin panel at http://192.168.50.107:3002/admin (token-gated)
+- Requires: DELETE /api/namespaces/:name endpoint in Flux (Task 1)
+- See /docs/decisions/009-stripe-provisioner.md for full plan
 
 **Infrastructure Ports (dev docker-compose):**
 - NATS client: 4223 (external) / 4222 (internal Docker network)

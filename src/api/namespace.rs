@@ -48,7 +48,10 @@ struct ErrorResponse {
 pub fn create_namespace_router(state: AppState) -> Router {
     Router::new()
         .route("/api/namespaces", post(register_namespace))
-        .route("/api/namespaces/:name", get(lookup_namespace))
+        .route(
+            "/api/namespaces/:name",
+            get(lookup_namespace).delete(delete_namespace),
+        )
         .with_state(Arc::new(state))
 }
 
@@ -117,6 +120,33 @@ async fn lookup_namespace(
         created_at: namespace.created_at.to_rfc3339(),
         entity_count: namespace.entity_count,
     }))
+}
+
+/// DELETE /api/namespaces/:name - Delete namespace (admin only)
+async fn delete_namespace(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(name): Path<String>,
+) -> Result<StatusCode, NamespaceError> {
+    // Require admin token if configured
+    if let Some(ref expected) = state.admin_token {
+        let provided = headers
+            .get("Authorization")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.strip_prefix("Bearer "));
+        if provided != Some(expected.as_str()) {
+            return Err(NamespaceError::Unauthorized);
+        }
+    }
+
+    info!(name = %name, "Deleting namespace");
+
+    if !state.namespace_registry.delete(&name) {
+        return Err(NamespaceError::NotFound);
+    }
+
+    info!(name = %name, "Namespace deleted");
+    Ok(StatusCode::NO_CONTENT)
 }
 
 /// Namespace API error types
@@ -459,5 +489,76 @@ mod tests {
 
         let response = app.oneshot(request).await.unwrap();
         assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn test_delete_namespace_missing_token() {
+        let app = create_test_app_with_token(true, Some("secret".to_string())).await;
+
+        let request = Request::builder()
+            .method("DELETE")
+            .uri("/api/namespaces/matt")
+            .body(Body::empty())
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn test_delete_namespace_wrong_token() {
+        let app = create_test_app_with_token(true, Some("secret".to_string())).await;
+
+        let request = Request::builder()
+            .method("DELETE")
+            .uri("/api/namespaces/matt")
+            .header("Authorization", "Bearer wrong")
+            .body(Body::empty())
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn test_delete_namespace_not_found() {
+        let app = create_test_app_with_token(true, Some("secret".to_string())).await;
+
+        let request = Request::builder()
+            .method("DELETE")
+            .uri("/api/namespaces/nonexistent")
+            .header("Authorization", "Bearer secret")
+            .body(Body::empty())
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn test_delete_namespace_success() {
+        let namespace_registry = Arc::new(NamespaceRegistry::new());
+        namespace_registry.register("matt").unwrap();
+
+        let event_publisher = create_test_publisher().await;
+        let state = AppState {
+            event_publisher,
+            namespace_registry,
+            auth_enabled: true,
+            admin_token: Some("secret".to_string()),
+            runtime_config: new_runtime_config(),
+            rate_limiter: Arc::new(RateLimiter::new()),
+        };
+        let app = create_namespace_router(state);
+
+        let request = Request::builder()
+            .method("DELETE")
+            .uri("/api/namespaces/matt")
+            .header("Authorization", "Bearer secret")
+            .body(Body::empty())
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
     }
 }

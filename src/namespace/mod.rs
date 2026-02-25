@@ -176,6 +176,31 @@ impl NamespaceRegistry {
         self.namespaces.get(namespace_id).map(|n| n.clone())
     }
 
+    /// Delete a namespace by name.
+    ///
+    /// Returns true if namespace existed and was removed, false if not found.
+    pub fn delete(&self, name: &str) -> bool {
+        // Remove from names index; if absent, namespace doesn't exist
+        let namespace_id = match self.names.remove(name) {
+            Some((_, id)) => id,
+            None => return false,
+        };
+
+        // Remove from primary store, get token for cleanup
+        if let Some((_, ns)) = self.namespaces.remove(&namespace_id) {
+            self.tokens.remove(&ns.token);
+        }
+
+        // Persist deletion (best-effort)
+        if let Some(ref store) = self.store {
+            if let Err(e) = store.delete(name) {
+                tracing::warn!(error = %e, name = %name, "Failed to delete namespace from store");
+            }
+        }
+
+        true
+    }
+
     /// Get count of registered namespaces
     pub fn count(&self) -> usize {
         self.namespaces.len()
