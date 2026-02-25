@@ -112,7 +112,7 @@ async fn run_bento_loop(
     status_map: Arc<Mutex<HashMap<String, GenericStatus>>>,
 ) {
     loop {
-        let yaml = render_bento_config(&config, &flux_api_url);
+        let yaml = render_bento_config(&config, &flux_api_url, config.flux_namespace_token.as_deref());
         let config_path = format!("/tmp/flux-bento-{}.yaml", config.id);
 
         if let Err(e) = tokio::fs::write(&config_path, &yaml).await {
@@ -125,6 +125,9 @@ async fn run_bento_loop(
         cmd.arg("-c").arg(&config_path);
         if let Some(ref token_val) = token {
             cmd.env("FLUX_GENERIC_TOKEN", token_val);
+        }
+        if let Some(ref flux_token) = config.flux_namespace_token {
+            cmd.env("FLUX_OUTPUT_TOKEN", flux_token);
         }
 
         {
@@ -189,10 +192,14 @@ async fn run_bento_loop(
 
 /// Renders the Bento YAML config for a generic HTTP polling source.
 ///
-/// The auth token is referenced via the `FLUX_GENERIC_TOKEN` environment
-/// variable — it is never embedded in the rendered file. The output is
-/// safe to log.
-pub fn render_bento_config(config: &GenericSourceConfig, flux_api_url: &str) -> String {
+/// Source auth token is referenced via `FLUX_GENERIC_TOKEN` env var.
+/// Flux output token is referenced via `FLUX_OUTPUT_TOKEN` env var.
+/// Neither token is ever embedded in the rendered file.
+pub fn render_bento_config(
+    config: &GenericSourceConfig,
+    flux_api_url: &str,
+    flux_namespace_token: Option<&str>,
+) -> String {
     let input_headers = match &config.auth_type {
         AuthType::None => String::new(),
         AuthType::BearerToken => {
@@ -204,6 +211,12 @@ pub fn render_bento_config(config: &GenericSourceConfig, flux_api_url: &str) -> 
                 header_name
             )
         }
+    };
+
+    let output_auth_header = if flux_namespace_token.is_some() {
+        "      Authorization: \"Bearer ${FLUX_OUTPUT_TOKEN}\"\n".to_string()
+    } else {
+        String::new()
     };
 
     format!(
@@ -234,7 +247,7 @@ output:
     verb: POST
     headers:
       Content-Type: application/json
-
+{output_auth_header}
 rate_limit_resources:
   - label: poll_rate
     local:
@@ -243,6 +256,7 @@ rate_limit_resources:
 "#,
         url = config.url,
         input_headers = input_headers,
+        output_auth_header = output_auth_header,
         poll_interval_secs = config.poll_interval_secs,
         source_id = config.id,
         entity_key = config.entity_key,
@@ -266,13 +280,14 @@ mod tests {
             namespace: "personal".to_string(),
             auth_type: auth,
             created_at: Utc::now(),
+            flux_namespace_token: None,
         }
     }
 
     #[test]
     fn test_render_bento_config_no_auth() {
         let config = make_config(AuthType::None);
-        let rendered = render_bento_config(&config, "http://localhost:3000");
+        let rendered = render_bento_config(&config, "http://localhost:3000", None);
 
         assert!(
             rendered.contains("https://api.coingecko.com/api/v3/simple/price"),
@@ -289,15 +304,15 @@ mod tests {
             "no_auth must not reference token env var"
         );
         assert!(
-            !rendered.contains("Authorization"),
-            "no_auth must not have Authorization header"
+            !rendered.contains("FLUX_OUTPUT_TOKEN"),
+            "no flux token must not reference output token env var"
         );
     }
 
     #[test]
     fn test_render_bento_config_bearer_token() {
         let config = make_config(AuthType::BearerToken);
-        let rendered = render_bento_config(&config, "http://localhost:3000");
+        let rendered = render_bento_config(&config, "http://localhost:3000", None);
 
         assert!(rendered.contains("https://api.coingecko.com/api/v3/simple/price"));
         assert!(rendered.contains("bitcoin"));
@@ -310,6 +325,10 @@ mod tests {
             !rendered.contains("actual-secret-token"),
             "must not contain any literal token value"
         );
+        assert!(
+            !rendered.contains("FLUX_OUTPUT_TOKEN"),
+            "no flux token must not add output auth header"
+        );
     }
 
     #[test]
@@ -317,7 +336,7 @@ mod tests {
         let config = make_config(AuthType::ApiKeyHeader {
             header_name: "X-API-Key".to_string(),
         });
-        let rendered = render_bento_config(&config, "http://localhost:3000");
+        let rendered = render_bento_config(&config, "http://localhost:3000", None);
 
         assert!(rendered.contains("https://api.coingecko.com/api/v3/simple/price"));
         assert!(rendered.contains("bitcoin"));
@@ -333,6 +352,42 @@ mod tests {
         assert!(
             !rendered.contains("actual-secret-token"),
             "must not contain any literal token value"
+        );
+    }
+
+    #[test]
+    fn test_render_bento_config_with_flux_token() {
+        let config = make_config(AuthType::None);
+        let rendered =
+            render_bento_config(&config, "http://localhost:3000", Some("flux-tok-xyz"));
+
+        assert!(
+            rendered.contains("FLUX_OUTPUT_TOKEN"),
+            "should reference output token env var"
+        );
+        assert!(
+            rendered.contains("Bearer ${FLUX_OUTPUT_TOKEN}"),
+            "should add Authorization header to output section"
+        );
+        assert!(
+            !rendered.contains("flux-tok-xyz"),
+            "must not embed literal flux token in config"
+        );
+    }
+
+    #[test]
+    fn test_render_bento_config_bearer_with_flux_token() {
+        let config = make_config(AuthType::BearerToken);
+        let rendered =
+            render_bento_config(&config, "http://localhost:3000", Some("flux-tok-xyz"));
+
+        assert!(
+            rendered.contains("Bearer ${FLUX_GENERIC_TOKEN}"),
+            "source auth header present"
+        );
+        assert!(
+            rendered.contains("Bearer ${FLUX_OUTPUT_TOKEN}"),
+            "flux output auth header present"
         );
     }
 }

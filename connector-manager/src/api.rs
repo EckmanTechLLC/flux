@@ -72,6 +72,8 @@ pub struct CreateGenericSourceRequest {
     pub auth_type: AuthTypeInput,
     /// Optional secret token — stored in CredentialStore, never logged.
     pub token: Option<String>,
+    /// Optional Flux namespace token for auth-enabled Flux instances.
+    pub flux_namespace_token: Option<String>,
 }
 
 /// Response for `POST /api/connectors/generic`.
@@ -89,6 +91,8 @@ pub struct CreateNamedSourceRequest {
     /// Tap configuration JSON (credentials + settings).
     pub config_json: String,
     pub poll_interval_secs: u64,
+    /// Optional Flux namespace token for auth-enabled Flux instances.
+    pub flux_namespace_token: Option<String>,
 }
 
 /// Response for `POST /api/connectors/named`.
@@ -144,6 +148,7 @@ pub async fn handle_create_generic_source(
         namespace: req.namespace,
         auth_type,
         created_at: Utc::now(),
+        flux_namespace_token: req.flux_namespace_token,
     };
 
     state.config_store.insert(&config)?;
@@ -182,6 +187,7 @@ pub async fn handle_create_named_source(
         config_json: req.config_json,
         poll_interval_secs: req.poll_interval_secs,
         created_at: Utc::now(),
+        flux_namespace_token: req.flux_namespace_token,
     };
     state.named_runner.store.insert(&config)?;
     state.named_runner.start_source(&config).await?;
@@ -460,6 +466,7 @@ mod tests {
             namespace: "personal".to_string(),
             auth_type: AuthTypeInput::Plain("none".to_string()),
             token: None,
+            flux_namespace_token: None,
         }
     }
 
@@ -470,6 +477,7 @@ mod tests {
             entity_key_field: "id".to_string(),
             config_json: r#"{"access_token": "ghp_test"}"#.to_string(),
             poll_interval_secs: 3600,
+            flux_namespace_token: None,
         }
     }
 

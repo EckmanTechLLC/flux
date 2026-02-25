@@ -874,6 +874,10 @@
       <label class="config-label">API Key Header Name</label>
       <input id="gsHeaderName" type="text" class="config-input" placeholder="X-API-Key">
     </div>
+    <div class="config-field">
+      <label class="config-label">Flux Namespace Token</label>
+      <input id="gsFluxToken" type="password" class="config-input" placeholder="Flux namespace token (if auth enabled)">
+    </div>
     <button class="config-save-btn" onclick="addGenericSource()">Add Source</button>
     <div class="config-feedback" id="gsFormFeedback"></div>
   </div>
@@ -900,6 +904,10 @@
     <div class="config-field">
       <label class="config-label">Config JSON</label>
       <textarea id="nsConfigJson" class="config-input" rows="4" placeholder='{"access_token": "your-token"}' style="resize:vertical;font-family:monospace;font-size:11px"></textarea>
+    </div>
+    <div class="config-field">
+      <label class="config-label">Flux Namespace Token</label>
+      <input id="nsFluxToken" type="password" class="config-input" placeholder="Flux namespace token (if auth enabled)">
     </div>
     <button class="config-save-btn" onclick="addNamedSource()">Add Source</button>
     <div class="config-feedback" id="nsFormFeedback"></div>
@@ -1722,6 +1730,7 @@ async function addNamedSource() {
   const entityKeyField = document.getElementById('nsEntityKeyField').value.trim();
   const poll = parseInt(document.getElementById('nsPoll').value) || 3600;
   const configJson = document.getElementById('nsConfigJson').value.trim();
+  const fluxToken = document.getElementById('nsFluxToken').value.trim();
   const feedback = document.getElementById('nsFormFeedback');
 
   if (!tapName || !entityKeyField || !configJson) {
@@ -1736,7 +1745,7 @@ async function addNamedSource() {
     return;
   }
 
-  const body = { tap_name: tapName, namespace, entity_key_field: entityKeyField, config_json: configJson, poll_interval_secs: poll };
+  const body = { tap_name: tapName, namespace, entity_key_field: entityKeyField, config_json: configJson, poll_interval_secs: poll, flux_namespace_token: fluxToken || null };
   feedback.className = 'config-feedback';
   try {
     const resp = await fetch('/api/connector-manager/connectors/named', {
@@ -1753,6 +1762,7 @@ async function addNamedSource() {
       document.getElementById('nsEntityKeyField').value = '';
       document.getElementById('nsPoll').value = '3600';
       document.getElementById('nsConfigJson').value = '';
+      document.getElementById('nsFluxToken').value = '';
       loadConnectorStatus();
     } else {
       feedback.textContent = data.error || `Error ${resp.status}`;
@@ -1779,6 +1789,7 @@ async function addGenericSource() {
   const authType = document.getElementById('gsAuthType').value;
   const token = document.getElementById('gsToken').value.trim();
   const headerName = document.getElementById('gsHeaderName').value.trim();
+  const fluxToken = document.getElementById('gsFluxToken').value.trim();
   const feedback = document.getElementById('gsFormFeedback');
 
   if (!name || !url || !entityKey) {
@@ -1802,6 +1813,7 @@ async function addGenericSource() {
     entity_key: entityKey,
     namespace,
     auth_type: authTypeBody,
+    flux_namespace_token: fluxToken || null,
   };
   if (token && authType !== 'none') body.token = token;
 
@@ -1824,6 +1836,7 @@ async function addGenericSource() {
       document.getElementById('gsAuthType').value = 'none';
       document.getElementById('gsToken').value = '';
       document.getElementById('gsHeaderName').value = '';
+      document.getElementById('gsFluxToken').value = '';
       onAuthTypeChange();
       loadConnectorStatus();
     } else {

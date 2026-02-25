@@ -32,6 +32,8 @@ pub struct NamedSourceConfig {
     pub poll_interval_secs: u64,
     /// When this source was created.
     pub created_at: DateTime<Utc>,
+    /// Optional Flux namespace token for auth-enabled Flux instances.
+    pub flux_namespace_token: Option<String>,
 }
 
 /// Persists named source configs in SQLite.
@@ -48,6 +50,7 @@ impl NamedConfigStore {
             conn: Mutex::new(conn),
         };
         store.create_table()?;
+        store.migrate()?;
         Ok(store)
     }
 
@@ -62,10 +65,25 @@ impl NamedConfigStore {
                 entity_key_field    TEXT NOT NULL,
                 config_json         TEXT NOT NULL,
                 poll_interval_secs  INTEGER NOT NULL,
-                created_at          TEXT NOT NULL
+                created_at          TEXT NOT NULL,
+                flux_namespace_token TEXT
             );",
         )
         .context("Failed to create named_sources table")?;
+        Ok(())
+    }
+
+    /// Adds `flux_namespace_token` column to existing databases.
+    fn migrate(&self) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        let result = conn.execute_batch(
+            "ALTER TABLE named_sources ADD COLUMN flux_namespace_token TEXT;",
+        );
+        if let Err(e) = result {
+            if !e.to_string().contains("duplicate column") {
+                return Err(e.into());
+            }
+        }
         Ok(())
     }
 
@@ -74,8 +92,8 @@ impl NamedConfigStore {
         let conn = self.conn.lock().unwrap();
         conn.execute(
             "INSERT INTO named_sources
-                (id, tap_name, namespace, entity_key_field, config_json, poll_interval_secs, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                (id, tap_name, namespace, entity_key_field, config_json, poll_interval_secs, created_at, flux_namespace_token)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             params![
                 config.id,
                 config.tap_name,
@@ -84,6 +102,7 @@ impl NamedConfigStore {
                 config.config_json,
                 config.poll_interval_secs as i64,
                 config.created_at.to_rfc3339(),
+                config.flux_namespace_token,
             ],
         )
         .context("Failed to insert named source config")?;
@@ -94,7 +113,7 @@ impl NamedConfigStore {
     pub fn get(&self, id: &str) -> Result<Option<NamedSourceConfig>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT id, tap_name, namespace, entity_key_field, config_json, poll_interval_secs, created_at
+            "SELECT id, tap_name, namespace, entity_key_field, config_json, poll_interval_secs, created_at, flux_namespace_token
              FROM named_sources WHERE id = ?1",
         )?;
         let mut rows = stmt.query(params![id])?;
@@ -109,7 +128,7 @@ impl NamedConfigStore {
     pub fn list(&self) -> Result<Vec<NamedSourceConfig>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT id, tap_name, namespace, entity_key_field, config_json, poll_interval_secs, created_at
+            "SELECT id, tap_name, namespace, entity_key_field, config_json, poll_interval_secs, created_at, flux_namespace_token
              FROM named_sources ORDER BY created_at ASC",
         )?;
         let rows = stmt.query_map([], |row| {
@@ -136,6 +155,7 @@ fn row_to_config(row: &rusqlite::Row<'_>) -> rusqlite::Result<NamedSourceConfig>
     let config_json: String = row.get(4)?;
     let poll_interval_secs: i64 = row.get(5)?;
     let created_at_str: String = row.get(6)?;
+    let flux_namespace_token: Option<String> = row.get(7)?;
     let created_at: DateTime<Utc> = created_at_str.parse().expect("Failed to parse created_at");
     Ok(NamedSourceConfig {
         id,
@@ -145,6 +165,7 @@ fn row_to_config(row: &rusqlite::Row<'_>) -> rusqlite::Result<NamedSourceConfig>
         config_json,
         poll_interval_secs: poll_interval_secs as u64,
         created_at,
+        flux_namespace_token,
     })
 }
 
@@ -170,6 +191,7 @@ mod tests {
             config_json: r#"{"access_token": "ghp_test"}"#.to_string(),
             poll_interval_secs: 3600,
             created_at: Utc::now(),
+            flux_namespace_token: None,
         }
     }
 

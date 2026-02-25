@@ -45,6 +45,8 @@ pub struct GenericSourceConfig {
     pub auth_type: AuthType,
     /// When this source was created.
     pub created_at: DateTime<Utc>,
+    /// Optional Flux namespace token for auth-enabled Flux instances.
+    pub flux_namespace_token: Option<String>,
 }
 
 /// Persists generic source configs in SQLite.
@@ -61,6 +63,7 @@ impl GenericConfigStore {
             conn: Mutex::new(conn),
         };
         store.create_table()?;
+        store.migrate()?;
         Ok(store)
     }
 
@@ -76,10 +79,25 @@ impl GenericConfigStore {
                 entity_key        TEXT NOT NULL,
                 namespace         TEXT NOT NULL,
                 auth_type_json    TEXT NOT NULL,
-                created_at        TEXT NOT NULL
+                created_at        TEXT NOT NULL,
+                flux_namespace_token TEXT
             );",
         )
         .context("Failed to create generic_sources table")?;
+        Ok(())
+    }
+
+    /// Adds `flux_namespace_token` column to existing databases.
+    fn migrate(&self) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        let result = conn.execute_batch(
+            "ALTER TABLE generic_sources ADD COLUMN flux_namespace_token TEXT;",
+        );
+        if let Err(e) = result {
+            if !e.to_string().contains("duplicate column") {
+                return Err(e.into());
+            }
+        }
         Ok(())
     }
 
@@ -90,8 +108,8 @@ impl GenericConfigStore {
         let conn = self.conn.lock().unwrap();
         conn.execute(
             "INSERT INTO generic_sources
-                (id, name, url, poll_interval_secs, entity_key, namespace, auth_type_json, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                (id, name, url, poll_interval_secs, entity_key, namespace, auth_type_json, created_at, flux_namespace_token)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
             params![
                 config.id,
                 config.name,
@@ -101,6 +119,7 @@ impl GenericConfigStore {
                 config.namespace,
                 auth_json,
                 config.created_at.to_rfc3339(),
+                config.flux_namespace_token,
             ],
         )
         .context("Failed to insert generic source config")?;
@@ -111,7 +130,7 @@ impl GenericConfigStore {
     pub fn get(&self, id: &str) -> Result<Option<GenericSourceConfig>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT id, name, url, poll_interval_secs, entity_key, namespace, auth_type_json, created_at
+            "SELECT id, name, url, poll_interval_secs, entity_key, namespace, auth_type_json, created_at, flux_namespace_token
              FROM generic_sources WHERE id = ?1",
         )?;
         let mut rows = stmt.query(params![id])?;
@@ -126,7 +145,7 @@ impl GenericConfigStore {
     pub fn list(&self) -> Result<Vec<GenericSourceConfig>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT id, name, url, poll_interval_secs, entity_key, namespace, auth_type_json, created_at
+            "SELECT id, name, url, poll_interval_secs, entity_key, namespace, auth_type_json, created_at, flux_namespace_token
              FROM generic_sources ORDER BY created_at ASC",
         )?;
         let rows = stmt.query_map([], |row| {
@@ -154,6 +173,7 @@ fn row_to_config(row: &rusqlite::Row<'_>) -> rusqlite::Result<GenericSourceConfi
     let namespace: String = row.get(5)?;
     let auth_type_json: String = row.get(6)?;
     let created_at_str: String = row.get(7)?;
+    let flux_namespace_token: Option<String> = row.get(8)?;
 
     let auth_type: AuthType =
         serde_json::from_str(&auth_type_json).expect("Failed to deserialize auth_type");
@@ -169,6 +189,7 @@ fn row_to_config(row: &rusqlite::Row<'_>) -> rusqlite::Result<GenericSourceConfi
         namespace,
         auth_type,
         created_at,
+        flux_namespace_token,
     })
 }
 
@@ -191,6 +212,7 @@ mod tests {
             namespace: "personal".to_string(),
             auth_type: AuthType::None,
             created_at: Utc::now(),
+            flux_namespace_token: None,
         }
     }
 

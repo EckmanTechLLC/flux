@@ -363,12 +363,16 @@ async fn run_tap_once(config: &NamedSourceConfig, flux_api_url: &str) -> Result<
                     }
                 });
 
-                if let Err(e) = http_client
+                let mut req = http_client
                     .post(format!("{}/api/events", flux_api_url))
-                    .json(&event)
-                    .send()
-                    .await
-                {
+                    .json(&event);
+                if let Some(ref token) = config.flux_namespace_token {
+                    req = req.header(
+                        "Authorization",
+                        format!("Bearer {}", token),
+                    );
+                }
+                if let Err(e) = req.send().await {
                     warn!(tap = %config.tap_name, error = %e, "Failed to post Singer event to Flux");
                 }
             }
