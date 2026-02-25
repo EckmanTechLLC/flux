@@ -1,15 +1,16 @@
 {
-  "name": "flux-ui",
+  "name": "ui-ratzilla",
   "version": "1.0.0",
-  "description": "Flux State Engine UI",
-  "main": "server.js",
+  "description": "Terminal-themed real-time Flux dashboard built with [Ratzilla](https://github.com/ratatui/ratzilla) (Ratatui + WASM).",
+  "main": "federation-ws.js",
   "scripts": {
-    "start": "node server.js"
+    "test": "echo \"Error: no test specified\" && exit 1"
   },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
   "dependencies": {
-    "ws": "^8.18.0"
-  },
-  "engines": {
-    "node": ">=18.0.0"
+    "ws": "^8.19.0"
   }
 }
