@@ -1,6 +1,6 @@
 # Flux API Reference
 
-**Last Updated:** 2026-02-20
+**Last Updated:** 2026-02-25
 
 ---
 
@@ -26,8 +26,7 @@ Flux exposes two primary APIs:
 **Public mode** (`auth_enabled = true`):
 - Write operations require `Authorization: Bearer <token>` header
 - Token is issued at namespace registration
-- Read operations (GET state, WebSocket subscribe) remain open
-- WebSocket upgrade requires `?token=<bearer-token>` query parameter
+- Read operations (GET state, WebSocket subscribe) remain open — no auth required
 - Admin config writes require `Authorization: Bearer <admin-token>` (separate token via `FLUX_ADMIN_TOKEN`)
 
 ---
@@ -65,7 +64,7 @@ Authorization: Bearer <token>  # Required when auth enabled
 - `eventId` (optional) - UUIDv7 identifier. Auto-generated if omitted.
 - `stream` (required) - Logical namespace (e.g., "sensors", "observations")
 - `source` (required) - Producer identity (e.g., "sensor-01", "agent-42")
-- `timestamp` (optional) - Unix epoch milliseconds. Defaults to current time if omitted.
+- `timestamp` (required) - Unix epoch milliseconds (e.g. `Date.now()` in JS, `int(time.time()*1000)` in Python).
 - `key` (optional) - Grouping/ordering key
 - `schema` (optional) - Schema metadata (not validated)
 - `payload` (required) - Event data (must be JSON object). **Limit: 1 MB.**
@@ -222,6 +221,59 @@ curl -X POST http://localhost:3000/api/events/batch \
 
 ---
 
+#### GET /api/events
+
+Retrieve raw stored events for an entity from the event log (NATS JetStream), newest-first.
+
+**Request:**
+
+```http
+GET /api/events?entity=flux-iss/iss&limit=50&since=2026-02-25T00:00:00Z HTTP/1.1
+```
+
+**Query parameters:**
+
+- `entity` (required) - Entity ID to fetch events for (e.g. `flux-iss/iss`)
+- `since` (optional) - ISO 8601 start timestamp. Default: 24 hours ago.
+- `limit` (optional) - Max events to return. Default: 100. Max: 500.
+
+**Response (200 OK):** Array of raw FluxEvent objects, newest-first.
+
+```json
+[
+  {
+    "eventId": "019c9523-08d7-7210-b479-867e167e939d",
+    "stream": "generic",
+    "source": "bento.abc123",
+    "timestamp": 1772028627158,
+    "key": "iss",
+    "payload": {
+      "entity_id": "flux-iss/iss",
+      "properties": {"latitude": "51.3", "longitude": "-137.6"}
+    }
+  }
+]
+```
+
+**Error responses:**
+
+```json
+// 400 Bad Request - Missing entity parameter
+{"error": "entity parameter is required"}
+
+// 400 Bad Request - Invalid since timestamp
+{"error": "invalid `since` timestamp (expected ISO 8601)"}
+```
+
+**curl example:**
+
+```bash
+curl "http://localhost:3000/api/events?entity=flux-iss/iss&limit=10"
+curl "http://localhost:3000/api/events?entity=flux-iss/iss&since=2026-02-25T00:00:00Z"
+```
+
+---
+
 ### State Query
 
 #### GET /api/state/entities
@@ -249,7 +301,7 @@ GET /api/state/entities HTTP/1.1
       "temperature": 22.5,
       "unit": "celsius"
     },
-    "last_updated": "2026-02-11T10:30:45.123Z"
+    "lastUpdated": "2026-02-11T10:30:45.123Z"
   }
 ]
 ```
@@ -277,7 +329,7 @@ Get a specific entity by ID.
     "unit": "celsius",
     "status": "active"
   },
-  "last_updated": "2026-02-11T10:30:45.123Z"
+  "lastUpdated": "2026-02-11T10:30:45.123Z"
 }
 ```
 
@@ -285,7 +337,7 @@ Get a specific entity by ID.
 
 ```json
 // 404 Not Found
-{"error": "Entity not found: temp-sensor-99"}
+{"error": "Entity not found"}
 ```
 
 **curl example:**
@@ -386,11 +438,14 @@ Namespaces are only available when `auth_enabled = true`. Returns 404 when auth 
 
 Register a new namespace. Returns the bearer token for use in subsequent requests.
 
+**Auth:** When `FLUX_ADMIN_TOKEN` is set, requires `Authorization: Bearer <admin-token>`. Without it, registration is unrestricted.
+
 **Request:**
 
 ```http
 POST /api/namespaces HTTP/1.1
 Content-Type: application/json
+Authorization: Bearer <admin-token>  # Required when FLUX_ADMIN_TOKEN is set
 
 {
   "name": "matt"
@@ -450,6 +505,40 @@ Look up an existing namespace (token is not included in response).
 
 ```bash
 curl http://localhost:3000/api/namespaces/matt
+```
+
+---
+
+#### DELETE /api/namespaces/:name
+
+Delete a namespace. Admin-only.
+
+**Auth:** Requires `Authorization: Bearer <admin-token>` when `FLUX_ADMIN_TOKEN` is set. Without it, unrestricted.
+
+**Request:**
+
+```http
+DELETE /api/namespaces/matt HTTP/1.1
+Authorization: Bearer <admin-token>
+```
+
+**Response (204 No Content):** Empty body.
+
+**Error responses:**
+
+```json
+// 401 Unauthorized - Missing or wrong admin token
+{"error": "Admin token required"}
+
+// 404 Not Found - Namespace does not exist
+{"error": "Namespace not found"}
+```
+
+**curl example:**
+
+```bash
+curl -X DELETE http://localhost:3000/api/namespaces/matt \
+  -H "Authorization: Bearer <admin-token>"
 ```
 
 ---
@@ -596,6 +685,67 @@ curl -X DELETE http://localhost:3000/api/connectors/github/token
 
 ---
 
+#### GET /api/connectors/:name/oauth/start
+
+Initiate OAuth 2.0 authorization flow for a connector. Redirects to the provider's authorization page.
+
+**Auth:** Requires `Authorization: Bearer <token>` when auth enabled.
+
+**Response:** HTTP `302` redirect to provider authorization URL.
+
+**Error responses:**
+
+```json
+// 404 Not Found - Unknown connector
+{"error": "Connector 'unknown' not found"}
+
+// 500 Internal Server Error - OAuth env vars not set
+{"error": "OAuth not configured for connector 'github'. Set FLUX_OAUTH_GITHUB_CLIENT_ID and FLUX_OAUTH_GITHUB_CLIENT_SECRET environment variables."}
+```
+
+**curl example:**
+
+```bash
+# Opens in browser — redirect follows to provider
+curl -L "http://localhost:3000/api/connectors/github/oauth/start" \
+  -H "Authorization: Bearer <token>"
+```
+
+---
+
+#### GET /api/connectors/:name/oauth/callback
+
+OAuth 2.0 callback endpoint. Called by the provider after user authorization. Exchanges code for token, stores encrypted credentials.
+
+This endpoint is called by the OAuth provider, not directly by clients.
+
+**Query parameters (provided by OAuth provider):**
+
+- `code` - Authorization code
+- `state` - CSRF state token (generated by `/oauth/start`)
+
+**Response (200 OK):**
+
+```json
+{
+  "success": true,
+  "message": "Successfully connected github",
+  "connector": "github"
+}
+```
+
+**Error responses:**
+
+```json
+// 400 Bad Request - OAuth denied by user
+{"error": "OAuth authorization failed: access_denied - User cancelled"}
+
+// 401 Unauthorized - Invalid/expired state token
+{"error": "Invalid or expired OAuth state (possible CSRF attack)"}
+```
+
+---
+
 ### Admin Config
 
 Runtime configuration for security limits. Changes take effect immediately — no restart required.
@@ -678,22 +828,12 @@ curl -X PUT http://localhost:3000/api/admin/config \
 
 Upgrade HTTP connection to WebSocket.
 
-**Auth:** When `auth_enabled = true`, token is required as a query parameter (WebSocket protocol does not support headers during upgrade):
-
-```
-ws://localhost:3000/api/ws?token=<bearer-token>
-```
-
-Invalid or missing token returns HTTP `401` before the upgrade.
+**Auth:** WebSocket is read-only — no authentication required regardless of `auth_enabled` mode.
 
 **JavaScript example:**
 
 ```javascript
-// Without auth
 const ws = new WebSocket('ws://localhost:3000/api/ws');
-
-// With auth
-const ws = new WebSocket('ws://localhost:3000/api/ws?token=<bearer-token>');
 
 ws.onopen = () => console.log('Connected to Flux');
 ws.onmessage = (event) => {
@@ -869,7 +1009,6 @@ ws.onmessage = (event) => {
 
 ### WebSocket Errors
 
-- **401 before upgrade:** Missing or invalid token (auth enabled)
 - **Invalid JSON message:** Silently ignored by server
 - **Unknown message type:** Silently ignored by server
 
@@ -923,7 +1062,7 @@ ws.onclose = (event) => {
 
 1. **Use WebSocket for real-time:** HTTP is for snapshot only
 2. **Cache locally:** Minimize repeated queries
-3. **Check last_updated:** Detect stale data
+3. **Check `lastUpdated`:** Detect stale data
 
 ---
 
