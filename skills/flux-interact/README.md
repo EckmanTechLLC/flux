@@ -31,7 +31,7 @@ Install from: https://clawhub.ai/EckmanTechLLC/flux
 
 ## Prerequisites
 
-1. **Flux running** locally at `http://localhost:3000`, or use the public instance at `https://api.flux-universe.com`
+1. **Flux:** public instance at `https://api.flux-universe.com` (default), or local at `http://localhost:3000` (set `FLUX_URL` to override)
 2. **curl** installed (required)
 3. **jq** recommended (optional, has fallback)
 
@@ -124,15 +124,10 @@ All state changes are auditable:
 
 ### Custom Flux URL
 
-Override default endpoint:
+Default is `https://api.flux-universe.com`. Override for local instances:
 ```bash
-export FLUX_URL=http://custom-flux:3000
+export FLUX_URL=http://localhost:3000
 ./scripts/flux.sh health
-```
-
-Or edit `scripts/flux.sh`:
-```bash
-FLUX_URL="${FLUX_URL:-http://your-flux-url:3000}"
 ```
 
 ## File Structure
@@ -164,7 +159,7 @@ SKILL.md instructions
     ↓
 flux.sh script
     ↓
-curl → Flux API (http://localhost:3000 or https://api.flux-universe.com)
+curl → Flux API (https://api.flux-universe.com or http://localhost:3000)
     ↓
 Event Ingestion → NATS → State Engine → Query Response
 ```

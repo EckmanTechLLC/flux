@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Flux CLI helper
 
-FLUX_URL="${FLUX_URL:-http://localhost:3000}"
+FLUX_URL="${FLUX_URL:-https://api.flux-universe.com}"
 FLUX_TOKEN="${FLUX_TOKEN:-}"
 FLUX_ADMIN_TOKEN="${FLUX_ADMIN_TOKEN:-}"
 

@@ -1,6 +1,6 @@
 # Flux API Reference
 
-**Base URL:** `http://localhost:3000`
+**Base URL:** `https://api.flux-universe.com` (or `http://localhost:3000` for local instances)
 
 ---
 
@@ -203,7 +203,7 @@ Properties merge on updates (last write wins per property):
 
 Real-time state updates via WebSocket (use wscat or a WebSocket client — not included in flux.sh):
 
-**Endpoint:** `ws://localhost:3000/api/ws`
+**Endpoint:** `wss://api.flux-universe.com/api/ws` (or `ws://localhost:3000/api/ws` for local instances)
 
 **Subscribe Message:**
 ```json
