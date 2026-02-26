@@ -1,7 +1,7 @@
 # Flux Context for Claude
 
-**Last Updated:** 2026-02-21
-**Status:** Active development — Connector Framework (ADR-007)
+**Last Updated:** 2026-02-26
+**Status:** Stable — Flux Universe public instance live, ADR-009 complete
 
 ---
 
@@ -31,9 +31,9 @@
 
 ## Current Status
 
-**Core engine complete ✅ 2026-02-14 — Connector Framework in progress 🔧**
+**Flux Universe public instance live ✅ 2026-02-26 — No active development**
 
-Core Flux deployed and stable. Active work on ADR-005 (Connector Framework).
+Core Flux stable. Connector framework complete. Stripe provisioner live. No open tasks.
 
 ### Phase 1: State Engine MVP (COMPLETE ✅ 2026-02-11)
 - [x] Git repository initialized
@@ -94,10 +94,10 @@ These were in early design docs but deemed unnecessary (2026-02-14):
 - Dev instance: /home/etl/projects/flux (Docker Compose, local)
 - Public instance: 192.168.50.107 at /home/etl/flux (Docker Compose via systemd flux.service)
   - FLUX_AUTH_ENABLED=true, FLUX_ADMIN_TOKEN set in .env
-  - Cloudflare + public domain NOT yet configured
+  - api.flux-universe.com → Cloudflare tunnel → localhost:3000
   - flux-monitor.service running (Python, monitors Flux health)
-- Legacy: etl-bot instance being retired (was https://flux.eckman-tech.com)
-- OpenClaw skill published to ClawHub registry (flux@1.0.0)
+- Marketing site: flux-universe.com on Render (flux-site repo)
+- Legacy etl-bot instance retired
 
 **Public Instance (.107) Live Namespaces:**
 - flux-iss: ISS position, details, crew
@@ -110,14 +110,25 @@ These were in early design docs but deemed unnecessary (2026-02-14):
   Authorization: Bearer to Flux API — required for auth-enabled instances
 - GENERIC_CONFIG_DB and NAMED_CONFIG_DB hardcoded to /data/ in docker-compose.yml
 
-**ADR-009: Stripe Provisioner (Approved, not yet built)**
+**ADR-009: Stripe Provisioner (COMPLETE ✅ 2026-02-26)**
 - Private Python/Flask service on .107 at /home/etl/flux-provisioner/ port 3002
 - pay.flux-universe.com → Cloudflare tunnel → localhost:3002
 - Stripe webhook → provision namespace → SMTP2GO email → SQLite storage
-- Word-pair namespace names (amber-river, swift-pine, etc.)
-- Admin panel at http://192.168.50.107:3002/admin (token-gated)
-- Requires: DELETE /api/namespaces/:name endpoint in Flux (Task 1)
-- See /docs/decisions/009-stripe-provisioner.md for full plan
+- Word-pair namespace names (e.g. amber-river, swift-pine)
+- Admin panel at pay.flux-universe.com/admin (token-gated)
+- DELETE /api/namespaces/:name endpoint added to Flux
+- See /docs/decisions/009-stripe-provisioner.md for full details
+
+**flux-site (2026-02-26):**
+- Astro marketing + docs site at /home/etl/projects/flux-site
+- Deployed on Render, custom domain flux-universe.com
+- API docs verified against codebase and corrected
+- flux-interact OpenClaw skill source added to /skills/flux-interact/
+
+**OpenClaw Skill:**
+- Published at https://clawhub.ai/EckmanTechLLC/flux
+- Source in /skills/flux-interact/ (SKILL.md, flux.sh, references/api.md)
+- Defaults to https://api.flux-universe.com
 
 **Infrastructure Ports (dev docker-compose):**
 - NATS client: 4223 (external) / 4222 (internal Docker network)
@@ -434,7 +445,7 @@ Producer → Event Ingestion (validate, persist)
 
 ## Known Issues
 
-None (fresh start)
+None
 
 ## Previous Work
 
