@@ -1,6 +1,16 @@
 ---
 name: flux
 description: Publish events and query shared world state via Flux state engine. Use when agents need to share observations, coordinate on shared data, or track entity state across systems.
+metadata:
+  {
+    "openclaw":
+      {
+        "emoji": "⚡",
+        "requires": { "env": ["FLUX_TOKEN"] },
+        "primaryEnv": "FLUX_TOKEN",
+        "optionalEnv": ["FLUX_URL", "FLUX_ADMIN_TOKEN"],
+      },
+  }
 ---
 
 # Flux Skill
