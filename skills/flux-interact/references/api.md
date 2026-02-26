@@ -28,7 +28,9 @@ Publish single event to Flux.
 
 **Optional Fields:**
 - `eventId` - Auto-generated UUIDv7 if omitted
-- `timestamp` - Defaults to current time if omitted
+- `timestamp` - Required. Unix epoch milliseconds
+  (e.g. `date +%s000` in bash, `int(time.time()*1000)` in Python).
+  flux.sh generates this automatically.
 - `key` - Optional ordering/grouping hint
 - `schema` - Optional schema metadata
 
@@ -78,13 +80,11 @@ Publish multiple events at once.
   "results": [
     {
       "eventId": "019c4da0-...",
-      "stream": "sensors",
-      "error": null
+      "stream": "sensors"
     },
     {
       "eventId": "019c4da1-...",
-      "stream": "sensors",
-      "error": null
+      "stream": "sensors"
     }
   ]
 }
@@ -199,9 +199,9 @@ Properties merge on updates (last write wins per property):
 
 ---
 
-## WebSocket Subscription (Future)
+## WebSocket Subscription
 
-Real-time state updates via WebSocket (not included in skill yet):
+Real-time state updates via WebSocket (use wscat or a WebSocket client — not included in flux.sh):
 
 **Endpoint:** `ws://localhost:3000/api/ws`
 
@@ -209,19 +209,18 @@ Real-time state updates via WebSocket (not included in skill yet):
 ```json
 {
   "type": "subscribe",
-  "entityId": "temp-sensor-01"
+  "entity_id": "temp-sensor-01"
 }
 ```
 
 **Update Notification:**
 ```json
 {
-  "type": "update",
-  "entity": {
-    "id": "temp-sensor-01",
-    "properties": {"temperature": 24.0},
-    "lastUpdated": "2026-02-11T..."
-  }
+  "type": "state_update",
+  "entity_id": "temp-sensor-01",
+  "property": "temperature",
+  "value": 24.0,
+  "timestamp": "2026-02-11T16:54:33.260296395+00:00"
 }
 ```
 

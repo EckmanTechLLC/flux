@@ -25,16 +25,13 @@ scp -r <your-host>:/path/to/flux-interact ~/workspace/skills/
 
 OpenClaw will auto-discover on next startup.
 
-### ClawHub Install (Option 2 - Future)
+### ClawHub Install (Option 2)
 
-Once published to ClawHub:
-```bash
-clawhub install flux-interact
-```
+Install from: https://clawhub.ai/EckmanTechLLC/flux
 
 ## Prerequisites
 
-1. **Flux running** at `http://localhost:3000`
+1. **Flux running** locally at `http://localhost:3000`, or use the public instance at `https://api.flux-universe.com`
 2. **curl** installed (required)
 3. **jq** recommended (optional, has fallback)
 
@@ -45,6 +42,8 @@ cd ~/workspace/skills/flux-interact
 ```
 
 ## Usage Examples
+
+> **Note:** entity IDs must be prefixed with your namespace (e.g. `dawn-coral/sensor-01`, not `sensor-01`)
 
 ### For OpenClaw Agents
 
@@ -165,28 +164,19 @@ SKILL.md instructions
     ↓
 flux.sh script
     ↓
-curl → Flux API (http://localhost:3000)
+curl → Flux API (http://localhost:3000 or https://api.flux-universe.com)
     ↓
 Event Ingestion → NATS → State Engine → Query Response
 ```
 
 ## Limitations
 
-- No WebSocket support yet (polling only)
-- No authentication (open access)
-- State is domain-agnostic (no validation)
-
-## Future Enhancements
-
-- [ ] WebSocket subscription support
-- [ ] Authentication via OpenClaw auth profiles
-- [ ] Stream filtering/queries
-- [ ] Event replay commands
-- [ ] State snapshot/restore
+- No WebSocket subscription support in flux.sh (use wscat or a WebSocket client directly against `GET /api/ws`)
+- State is domain-agnostic (no schema validation)
 
 ## Contributing
 
-This skill is part of the [NYX project](https://github.com/EckmanTechLLC/nyx).
+This skill is part of [Flux](https://github.com/EckmanTechLLC/flux).
 
 ## License
 
