@@ -1,5 +1,6 @@
 [workspace]
 members = [".", "connector-manager"]
+exclude = ["ui"]
 
 [package]
 name = "flux"

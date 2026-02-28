@@ -1,0 +1,1912 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Flux — World State Engine</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  
+  :root {
+    --bg: #0a0a0f;
+    --bg2: #12121a;
+    --bg3: #1a1a25;
+    --border: #2a2a3a;
+    --text: #e0e0e8;
+    --text-dim: #6a6a80;
+    --accent: #6c5ce7;
+    --accent2: #a855f7;
+    --green: #00d2a0;
+    --yellow: #f5c542;
+    --red: #ff6b6b;
+    --blue: #4fc3f7;
+    --orange: #ff9f43;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    overflow-x: hidden;
+  }
+
+  /* Header */
+  .header {
+    padding: 20px 32px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    background: linear-gradient(180deg, var(--bg2) 0%, var(--bg) 100%);
+  }
+
+  .header h1 {
+    font-size: 28px;
+    font-weight: 700;
+    background: linear-gradient(135deg, var(--accent2), var(--blue));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    letter-spacing: -0.5px;
+  }
+
+  .header .subtitle {
+    color: var(--text-dim);
+    font-size: 14px;
+  }
+
+  .header .status {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    color: var(--text-dim);
+  }
+
+  .status-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--green);
+    animation: pulse 2s ease-in-out infinite;
+  }
+
+  .status-dot.disconnected { background: var(--red); animation: none; }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+  }
+
+  /* Pipeline - the interactive flow */
+  .pipeline {
+    padding: 20px 32px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg2);
+    display: flex;
+    align-items: stretch;
+    justify-content: center;
+    gap: 0;
+    overflow-x: auto;
+  }
+
+  .pipe-node {
+    padding: 14px 20px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--bg3);
+    min-width: 150px;
+    text-align: center;
+    transition: all 0.3s ease;
+    position: relative;
+  }
+
+  .pipe-node:hover {
+    border-color: var(--accent);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 16px rgba(108, 92, 231, 0.15);
+  }
+
+  .pipe-node.active {
+    border-color: var(--green);
+    box-shadow: 0 0 12px rgba(0, 210, 160, 0.1);
+  }
+
+  .pipe-label {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+    margin-bottom: 8px;
+  }
+
+  .pipe-stats {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .pipe-stat {
+    font-size: 20px;
+    font-weight: 700;
+    font-family: 'JetBrains Mono', monospace;
+    line-height: 1;
+  }
+
+  .pipe-stat.green { color: var(--green); }
+  .pipe-stat.blue { color: var(--blue); }
+  .pipe-stat.purple { color: var(--accent2); }
+  .pipe-stat.orange { color: var(--orange); }
+
+  .pipe-desc {
+    font-size: 10px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-top: 2px;
+  }
+
+  .pipe-arrow {
+    display: flex;
+    align-items: center;
+    padding: 0 8px;
+    position: relative;
+  }
+
+  .pipe-arrow svg {
+    width: 32px;
+    height: 20px;
+    overflow: visible;
+  }
+
+  .arrow-line {
+    stroke: var(--border);
+    stroke-width: 2;
+    fill: none;
+  }
+
+  .arrow-head {
+    fill: var(--border);
+  }
+
+  .arrow-particle {
+    fill: var(--green);
+    opacity: 0;
+  }
+
+  .pipe-arrow.flowing .arrow-line { stroke: var(--green); stroke-width: 2; }
+  .pipe-arrow.flowing .arrow-head { fill: var(--green); }
+  .pipe-arrow.flowing .arrow-particle {
+    animation: flowParticle 0.8s ease-in-out infinite;
+  }
+
+  @keyframes flowParticle {
+    0% { opacity: 0; cx: 2; }
+    20% { opacity: 1; }
+    80% { opacity: 1; }
+    100% { opacity: 0; cx: 28; }
+  }
+
+  /* Main layout */
+  .main {
+    display: grid;
+    grid-template-columns: 1fr 360px;
+    height: calc(100vh - 170px);
+  }
+
+  /* Aether - entity graph */
+  .aether {
+    padding: 20px 24px;
+    overflow: auto;
+  }
+
+  .aether-title {
+    font-size: 15px;
+    font-weight: 600;
+    margin-bottom: 16px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--text-dim);
+  }
+
+  .aether-title span { color: var(--accent2); }
+
+  /* Entity groups */
+  .entity-filter {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 12px;
+    align-items: center;
+  }
+  .filter-chip {
+    padding: 4px 12px;
+    border-radius: 12px;
+    font-size: 12px;
+    cursor: pointer;
+    border: 1px solid var(--border);
+    background: var(--card);
+    color: var(--dim);
+    transition: all 0.2s;
+    user-select: none;
+  }
+  .filter-chip.active {
+    border-color: var(--accent);
+    color: var(--text);
+  }
+  .filter-chip.hidden {
+    opacity: 0.4;
+    text-decoration: line-through;
+  }
+  .filter-chip:hover { border-color: var(--accent); }
+  .filter-search {
+    padding: 4px 10px;
+    border-radius: 12px;
+    border: 1px solid var(--border);
+    background: var(--card);
+    color: var(--text);
+    font-size: 12px;
+    outline: none;
+    width: 140px;
+  }
+  .filter-search:focus { border-color: var(--accent); }
+
+  .entity-groups {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 20px;
+    align-content: flex-start;
+  }
+
+  .entity-group {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 14px;
+    min-width: 220px;
+    flex: 1;
+    max-width: 420px;
+  }
+
+  .group-label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: var(--text-dim);
+    margin-bottom: 10px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    user-select: none;
+  }
+
+  .group-label:hover { color: var(--text); }
+
+  .group-label .group-toggle {
+    font-size: 10px;
+    transition: transform 0.2s;
+  }
+
+  .entity-group.collapsed .group-toggle { transform: rotate(-90deg); }
+  .entity-group.collapsed .entity-node { display: none; }
+  .entity-group.collapsed .group-summary { display: block; }
+
+  .group-summary {
+    display: none;
+    font-size: 11px;
+    color: var(--text-dim);
+    padding: 6px 0;
+  }
+
+  .group-icon {
+    width: 16px; height: 16px;
+    border-radius: 4px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 10px;
+  }
+
+  .entity-node {
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 12px;
+    margin-bottom: 6px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    position: relative;
+  }
+
+  .entity-node:last-child { margin-bottom: 0; }
+
+  .entity-node:hover {
+    border-color: var(--accent);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+  }
+
+  .entity-node.flash {
+    border-color: var(--green);
+    box-shadow: 0 0 16px rgba(0, 210, 160, 0.15);
+  }
+
+  .entity-node.stale {
+    opacity: 0.5;
+  }
+
+  .entity-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 4px;
+  }
+
+  .entity-name {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text);
+    font-family: 'JetBrains Mono', monospace;
+  }
+
+  .entity-status {
+    font-size: 9px;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-weight: 500;
+  }
+
+  .entity-status.healthy, .entity-status.active, .entity-status.online {
+    background: rgba(0, 210, 160, 0.12);
+    color: var(--green);
+  }
+
+  .entity-status.warning {
+    background: rgba(245, 197, 66, 0.12);
+    color: var(--yellow);
+  }
+
+  .entity-status.critical, .entity-status.error {
+    background: rgba(255, 107, 107, 0.12);
+    color: var(--red);
+  }
+
+  .entity-time {
+    font-size: 9px;
+    color: var(--text-dim);
+  }
+
+  .entity-props {
+    display: none;
+    flex-direction: column;
+    gap: 3px;
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid var(--border);
+  }
+
+  .entity-node.expanded .entity-props {
+    display: flex;
+  }
+
+  .prop-row {
+    display: flex;
+    justify-content: space-between;
+    font-size: 10px;
+    align-items: center;
+  }
+
+  .prop-key { color: var(--text-dim); }
+  .prop-val { 
+    color: var(--text); 
+    font-family: 'JetBrains Mono', monospace;
+    text-align: right;
+    font-size: 10px;
+    word-break: break-word;
+    white-space: pre-wrap;
+    max-width: 250px;
+  }
+
+  .prop-val.changed {
+    color: var(--green);
+    transition: color 1.5s ease;
+  }
+
+  .prop-bar {
+    height: 3px;
+    border-radius: 2px;
+    background: var(--border);
+    margin-top: 2px;
+    overflow: hidden;
+  }
+
+  .prop-bar-fill {
+    height: 100%;
+    border-radius: 2px;
+    transition: width 0.5s ease;
+  }
+
+  /* Event stream panel */
+  .stream-panel {
+    border-left: 1px solid var(--border);
+    background: var(--bg2);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .stream-header {
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--border);
+    font-size: 14px;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .stream-header .count {
+    margin-left: auto;
+    font-size: 11px;
+    color: var(--text-dim);
+    font-weight: 400;
+  }
+
+  .stream-events {
+    flex: 1;
+    overflow-y: auto;
+    padding: 6px 8px;
+  }
+
+  .stream-event {
+    padding: 6px 10px;
+    border-radius: 5px;
+    margin-bottom: 3px;
+    font-size: 11px;
+    font-family: 'JetBrains Mono', monospace;
+    animation: slideIn 0.3s ease;
+    background: var(--bg);
+    border: 1px solid transparent;
+    line-height: 1.4;
+  }
+
+  .stream-event:hover {
+    border-color: var(--border);
+  }
+
+  @keyframes slideIn {
+    from { opacity: 0; transform: translateY(-6px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .event-entity { color: var(--blue); font-weight: 600; }
+  .event-prop { color: var(--accent2); }
+  .event-value { color: var(--green); }
+  .event-time { color: var(--text-dim); font-size: 10px; float: right; }
+
+  /* Connectors / Config toggle buttons */
+  .connectors-toggle {
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 6px 12px;
+    color: var(--text-dim);
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.2s;
+    white-space: nowrap;
+  }
+
+  .connectors-toggle:hover {
+    border-color: var(--accent);
+    color: var(--text);
+  }
+
+  .connectors-panel {
+    position: fixed;
+    top: 64px;
+    right: 16px;
+    width: 380px;
+    max-height: calc(100vh - 100px);
+    overflow-y: auto;
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px;
+    z-index: 100;
+    display: none;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+  }
+
+  .connectors-panel.visible { display: block; }
+
+  .connectors-panel h3 {
+    font-size: 14px;
+    font-weight: 600;
+    margin-bottom: 12px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .connector-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 13px;
+  }
+
+  .connector-row:last-child { border-bottom: none; }
+
+  .connector-info {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .connector-icon { font-size: 16px; }
+
+  .connector-name {
+    font-weight: 500;
+    color: var(--text);
+  }
+
+  .connector-badge {
+    font-size: 10px;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-weight: 500;
+  }
+
+  .connector-badge.connected {
+    background: rgba(0, 210, 160, 0.12);
+    color: var(--green);
+  }
+
+  .connector-badge.not-connected {
+    background: rgba(106, 106, 128, 0.15);
+    color: var(--text-dim);
+  }
+
+  .connector-action a {
+    font-size: 12px;
+    color: var(--accent2);
+    text-decoration: none;
+    padding: 4px 10px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    transition: all 0.2s;
+  }
+
+  .connector-action a:hover {
+    border-color: var(--accent2);
+    background: rgba(168, 85, 247, 0.08);
+  }
+
+  .connector-action a.disconnect {
+    color: var(--text-dim);
+  }
+
+  .connector-action a.disconnect:hover {
+    border-color: var(--red);
+    color: var(--red);
+    background: rgba(255, 107, 107, 0.08);
+  }
+
+  /* Config Panel */
+  .config-panel {
+    position: fixed;
+    top: 64px;
+    right: 16px;
+    width: 320px;
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px;
+    z-index: 100;
+    display: none;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+  }
+
+  .config-panel.visible { display: block; }
+
+  .config-panel h3 {
+    font-size: 14px;
+    font-weight: 600;
+    margin-bottom: 12px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .config-field { margin-bottom: 12px; }
+
+  .config-label {
+    font-size: 11px;
+    color: var(--text-dim);
+    margin-bottom: 4px;
+    display: block;
+  }
+
+  .config-input {
+    width: 100%;
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 5px 8px;
+    color: var(--text);
+    font-size: 12px;
+    font-family: 'JetBrains Mono', monospace;
+    outline: none;
+  }
+
+  .config-input:focus { border-color: var(--accent); }
+
+  .config-checkbox-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    cursor: pointer;
+  }
+
+  .config-divider {
+    border: none;
+    border-top: 1px solid var(--border);
+    margin: 12px 0;
+  }
+
+  .config-save-btn {
+    width: 100%;
+    padding: 7px;
+    background: var(--accent);
+    border: none;
+    border-radius: 6px;
+    color: white;
+    font-size: 12px;
+    cursor: pointer;
+    font-weight: 500;
+    margin-top: 4px;
+    transition: background 0.2s;
+  }
+
+  .config-save-btn:hover { background: var(--accent2); }
+
+  .config-feedback {
+    font-size: 11px;
+    margin-top: 8px;
+    text-align: center;
+    display: none;
+  }
+
+  .config-feedback.ok { color: var(--green); display: block; }
+  .config-feedback.err { color: var(--red); display: block; }
+
+  /* History button on entity rows */
+  .history-btn {
+    background: none;
+    border: none;
+    color: var(--text-dim);
+    cursor: pointer;
+    font-size: 11px;
+    padding: 1px 5px;
+    border-radius: 3px;
+    line-height: 1;
+    flex-shrink: 0;
+  }
+
+  .history-btn:hover {
+    color: var(--blue);
+    background: rgba(79, 195, 247, 0.1);
+  }
+
+  /* Responsive */
+  @media (max-width: 900px) {
+    .main { grid-template-columns: 1fr; }
+    .stream-panel { height: 280px; border-left: none; border-top: 1px solid var(--border); }
+    .pipeline { padding: 12px 16px; }
+    .pipe-node { min-width: 100px; padding: 10px 12px; }
+    .pipe-stat { font-size: 16px; }
+  }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 5px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+</style>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+
+<div class="header">
+  <h1>⟁ Flux</h1>
+  <div class="subtitle">World State Engine</div>
+  <div class="status">
+    <div class="status-dot" id="wsStatus"></div>
+    <span id="wsLabel">Connecting…</span>
+    <button class="connectors-toggle" onclick="toggleConnectors()">🔌 Connectors</button>
+    <button class="connectors-toggle" onclick="toggleConfig()">⚙ Config</button>
+  </div>
+</div>
+
+<div class="pipeline">
+  <div class="pipe-node" id="pipePublishers">
+    <div class="pipe-label">Publishers</div>
+    <div class="pipe-stats">
+      <div class="pipe-stat green" id="pipeActiveCount">-</div>
+      <div class="pipe-desc">active sources</div>
+    </div>
+  </div>
+
+  <div class="pipe-arrow" id="arrow1">
+    <svg viewBox="0 0 32 20">
+      <line class="arrow-line" x1="2" y1="10" x2="26" y2="10"/>
+      <polygon class="arrow-head" points="24,6 32,10 24,14"/>
+      <circle class="arrow-particle" r="3" cy="10" cx="2"/>
+    </svg>
+  </div>
+
+  <div class="pipe-node" id="pipeEvents">
+    <div class="pipe-label">Events API</div>
+    <div class="pipe-stats">
+      <div class="pipe-stat blue" id="pipeEps">-</div>
+      <div class="pipe-desc">events / sec</div>
+    </div>
+  </div>
+
+  <div class="pipe-arrow" id="arrow2">
+    <svg viewBox="0 0 32 20">
+      <line class="arrow-line" x1="2" y1="10" x2="26" y2="10"/>
+      <polygon class="arrow-head" points="24,6 32,10 24,14"/>
+      <circle class="arrow-particle" r="3" cy="10" cx="2"/>
+    </svg>
+  </div>
+
+  <div class="pipe-node" id="pipeNats">
+    <div class="pipe-label">NATS JetStream</div>
+    <div class="pipe-stats">
+      <div class="pipe-stat purple" id="pipeTotalEvents">-</div>
+      <div class="pipe-desc">total events</div>
+    </div>
+  </div>
+
+  <div class="pipe-arrow" id="arrow3">
+    <svg viewBox="0 0 32 20">
+      <line class="arrow-line" x1="2" y1="10" x2="26" y2="10"/>
+      <polygon class="arrow-head" points="24,6 32,10 24,14"/>
+      <circle class="arrow-particle" r="3" cy="10" cx="2"/>
+    </svg>
+  </div>
+
+  <div class="pipe-node" id="pipeEngine">
+    <div class="pipe-label">Flux Engine</div>
+    <div class="pipe-stats">
+      <div class="pipe-stat orange" id="pipeEntityCount">-</div>
+      <div class="pipe-desc">entities materialized</div>
+    </div>
+  </div>
+
+  <div class="pipe-arrow" id="arrow4">
+    <svg viewBox="0 0 32 20">
+      <line class="arrow-line" x1="2" y1="10" x2="26" y2="10"/>
+      <polygon class="arrow-head" points="24,6 32,10 24,14"/>
+      <circle class="arrow-particle" r="3" cy="10" cx="2"/>
+    </svg>
+  </div>
+
+  <div class="pipe-node" id="pipeApi">
+    <div class="pipe-label">REST · WebSocket</div>
+    <div class="pipe-stats">
+      <div class="pipe-stat green" id="pipeWsClients">-</div>
+      <div class="pipe-desc">live subscribers</div>
+    </div>
+  </div>
+</div>
+
+<div class="main">
+  <div class="aether">
+    <div class="aether-title"><span>◈</span> Entity State <span id="namespaceIndicator" style="margin-left:auto;font-size:11px;color:var(--text-dim);display:none"></span></div>
+    <div style="display:flex;gap:8px;margin-bottom:8px;align-items:center">
+      <label style="font-size:11px;color:var(--text-dim)">Server prefix:</label>
+      <input id="serverPrefix" type="text" placeholder="e.g. host-, arc/" style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:4px 10px;color:var(--text);font-size:12px;width:160px;font-family:'JetBrains Mono',monospace" />
+      <button onclick="applyServerPrefix()" style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:4px 12px;color:var(--text);font-size:12px;cursor:pointer">Apply</button>
+      <button onclick="document.getElementById('serverPrefix').value='';applyServerPrefix()" style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:4px 12px;color:var(--text-dim);font-size:12px;cursor:pointer">Clear</button>
+    </div>
+    <div class="entity-filter" id="entityFilter"></div>
+    <div class="entity-groups" id="entityGroups"></div>
+  </div>
+
+  <div class="stream-panel">
+    <div class="stream-header">
+      ⚡ Event Stream
+      <span class="count" id="eventCount">0 events</span>
+    </div>
+    <div class="stream-events" id="streamEvents"></div>
+  </div>
+</div>
+
+<div class="connectors-panel" id="connectorsPanel">
+  <h3>🔌 Connected Services</h3>
+  <div id="connectorsList">
+    <div style="font-size:12px;color:var(--text-dim);text-align:center;padding:12px 0">Loading…</div>
+  </div>
+  <hr class="config-divider" style="margin-top:12px">
+  <button onclick="toggleGenericForm()" style="width:100%;padding:6px;background:var(--bg3);border:1px solid var(--border);border-radius:6px;color:var(--text-dim);font-size:12px;cursor:pointer;transition:all 0.2s">+ Add Generic Source</button>
+  <div id="genericSourceForm" style="display:none;margin-top:10px">
+    <div class="config-field">
+      <label class="config-label">Source Name</label>
+      <input id="gsName" type="text" class="config-input" placeholder="Bitcoin Price">
+    </div>
+    <div class="config-field">
+      <label class="config-label">URL</label>
+      <input id="gsUrl" type="text" class="config-input" placeholder="https://api.example.com/data">
+    </div>
+    <div style="display:flex;gap:6px">
+      <div class="config-field" style="flex:1">
+        <label class="config-label">Poll Every (sec)</label>
+        <input id="gsPoll" type="number" class="config-input" value="300" min="10">
+      </div>
+      <div class="config-field" style="flex:1">
+        <label class="config-label">Entity Key</label>
+        <input id="gsEntityKey" type="text" class="config-input" placeholder="bitcoin">
+      </div>
+    </div>
+    <div class="config-field">
+      <label class="config-label">Namespace</label>
+      <input id="gsNamespace" type="text" class="config-input" value="personal">
+    </div>
+    <div class="config-field">
+      <label class="config-label">Auth Type</label>
+      <select id="gsAuthType" class="config-input" onchange="onAuthTypeChange()">
+        <option value="none">None</option>
+        <option value="bearer">Bearer Token</option>
+        <option value="api_key">API Key Header</option>
+      </select>
+    </div>
+    <div id="gsTokenField" class="config-field" style="display:none">
+      <label class="config-label">Token</label>
+      <input id="gsToken" type="password" class="config-input" placeholder="Bearer token or API key value">
+    </div>
+    <div id="gsHeaderNameField" class="config-field" style="display:none">
+      <label class="config-label">API Key Header Name</label>
+      <input id="gsHeaderName" type="text" class="config-input" placeholder="X-API-Key">
+    </div>
+    <div class="config-field">
+      <label class="config-label">Flux Namespace Token</label>
+      <input id="gsFluxToken" type="password" class="config-input" placeholder="Flux namespace token (if auth enabled)">
+    </div>
+    <button class="config-save-btn" onclick="addGenericSource()">Add Source</button>
+    <div class="config-feedback" id="gsFormFeedback"></div>
+  </div>
+  <button onclick="toggleNamedForm()" style="width:100%;padding:6px;margin-top:6px;background:var(--bg3);border:1px solid var(--border);border-radius:6px;color:var(--text-dim);font-size:12px;cursor:pointer;transition:all 0.2s">+ Add Named Source</button>
+  <div id="namedSourceForm" style="display:none;margin-top:10px">
+    <div class="config-field">
+      <label class="config-label">Tap Name</label>
+      <input id="nsTapName" type="text" class="config-input" placeholder="tap-github">
+    </div>
+    <div class="config-field">
+      <label class="config-label">Namespace</label>
+      <input id="nsNamespace" type="text" class="config-input" value="personal">
+    </div>
+    <div style="display:flex;gap:6px">
+      <div class="config-field" style="flex:1">
+        <label class="config-label">Entity Key Field</label>
+        <input id="nsEntityKeyField" type="text" class="config-input" placeholder="id">
+      </div>
+      <div class="config-field" style="flex:1">
+        <label class="config-label">Poll Every (sec)</label>
+        <input id="nsPoll" type="number" class="config-input" value="3600" min="60">
+      </div>
+    </div>
+    <div class="config-field">
+      <label class="config-label">Config JSON</label>
+      <textarea id="nsConfigJson" class="config-input" rows="4" placeholder='{"access_token": "your-token"}' style="resize:vertical;font-family:monospace;font-size:11px"></textarea>
+    </div>
+    <div class="config-field">
+      <label class="config-label">Flux Namespace Token</label>
+      <input id="nsFluxToken" type="password" class="config-input" placeholder="Flux namespace token (if auth enabled)">
+    </div>
+    <button class="config-save-btn" onclick="addNamedSource()">Add Source</button>
+    <div class="config-feedback" id="nsFormFeedback"></div>
+  </div>
+</div>
+
+<div class="config-panel" id="configPanel">
+  <h3>⚙ Runtime Config</h3>
+  <div class="config-field">
+    <label class="config-label">Admin Token (optional — required when auth enabled)</label>
+    <input id="configToken" type="password" class="config-input" placeholder="FLUX_ADMIN_TOKEN">
+  </div>
+  <hr class="config-divider">
+  <div class="config-field">
+    <label class="config-checkbox-row">
+      <input type="checkbox" id="cfgRateLimitEnabled">
+      <span>Rate Limiting Enabled</span>
+    </label>
+  </div>
+  <div class="config-field">
+    <label class="config-label">Rate Limit (events / namespace / minute)</label>
+    <input id="cfgRateLimit" type="number" class="config-input" min="1">
+  </div>
+  <div class="config-field">
+    <label class="config-label">Body Size — Single Event (bytes)</label>
+    <input id="cfgBodySingle" type="number" class="config-input" min="1">
+  </div>
+  <div class="config-field">
+    <label class="config-label">Body Size — Batch Events (bytes)</label>
+    <input id="cfgBodyBatch" type="number" class="config-input" min="1">
+  </div>
+  <button class="config-save-btn" onclick="saveAdminConfig()">Save</button>
+  <div class="config-feedback" id="configFeedback"></div>
+</div>
+
+<!-- History Modal -->
+<div id="historyModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:200;align-items:flex-start;justify-content:center;padding-top:60px">
+  <div style="background:var(--bg2);border:1px solid var(--border);border-radius:12px;width:640px;max-height:75vh;display:flex;flex-direction:column;box-shadow:0 16px 48px rgba(0,0,0,0.6)">
+    <div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px;flex-shrink:0">
+      <span style="font-size:14px;font-weight:600">⟳ History</span>
+      <span id="historyEntityId" style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--blue)"></span>
+      <button onclick="closeHistory()" style="margin-left:auto;background:none;border:none;color:var(--text-dim);cursor:pointer;font-size:18px;line-height:1;padding:0 4px">✕</button>
+    </div>
+    <div id="historyContent" style="overflow-y:auto;padding:8px;flex:1;font-family:'JetBrains Mono',monospace;font-size:11px"></div>
+  </div>
+</div>
+
+<script>
+// Dynamic entity types (computed from actual entities)
+let entityTypes = {};
+
+// Filter state — hidden groups won't render
+let hiddenTypes = new Set();
+
+const STALE_THRESHOLD = 120000; // 2 minutes
+
+let entities = {};
+let eventCount = 0;
+let lastFlowTime = 0;
+
+// Generate consistent color from string hash
+function generateEntityColor(str) {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    hash = str.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  const hue = Math.abs(hash) % 360;
+  return `hsl(${hue}, 65%, 55%)`;
+}
+
+// Map common entity type prefixes to emojis
+function getEntityIcon(type) {
+  const iconMap = {
+    'agent': '🤖',
+    'task': '✓',
+    'session': '📋',
+    'artifact': '📄',
+    'host': '🖥',
+    'sensor': '🌡',
+    'device': '⚙',
+    'service': '🔧',
+    'job': '⚡',
+    'user': '👤',
+    'team': '👥',
+    'project': '📁',
+    'metric': '📊',
+    'alert': '🔔',
+    'log': '📝'
+  };
+  return iconMap[type.toLowerCase()] || '◆';
+}
+
+// Detect entity types dynamically from current entities
+// Uses delimiter-aware thresholds:
+// - : (type:id) → threshold = 1 (intentional structure)
+// - / (namespace/id) → threshold = 1 (intentional structure)
+// - - (first segment only, e.g., host-server) → threshold = 2 (might be accidental)
+function detectEntityTypes() {
+  const prefixCounts = {};
+  const delimiterUsed = {}; // Track which delimiter was used per prefix
+
+  // Analyze all entity IDs
+  for (const id of Object.keys(entities)) {
+    let prefix = null;
+    let delimiter = null;
+
+    // Check delimiters in priority order: :, /, -
+    if (id.includes(':')) {
+      prefix = id.split(':')[0];
+      delimiter = ':';
+    } else if (id.includes('/')) {
+      prefix = id.split('/')[0];
+      delimiter = '/';
+    } else if (id.includes('-')) {
+      // For -, only split on first occurrence (host-etl-demo-01 → "host")
+      prefix = id.split('-')[0];
+      delimiter = '-';
+    }
+
+    if (prefix) {
+      prefixCounts[prefix] = (prefixCounts[prefix] || 0) + 1;
+      if (!delimiterUsed[prefix]) {
+        delimiterUsed[prefix] = delimiter;
+      }
+    }
+  }
+
+  // Build entity types from prefixes that meet delimiter-specific threshold
+  const newTypes = {};
+  for (const [prefix, count] of Object.entries(prefixCounts)) {
+    const delimiter = delimiterUsed[prefix];
+    // : and / have threshold=1 (intentional structure)
+    // - has threshold=2 (might be accidental)
+    const threshold = (delimiter === ':' || delimiter === '/') ? 1 : 2;
+
+    if (count >= threshold) {
+      const label = prefix.charAt(0).toUpperCase() + prefix.slice(1) + 's';
+      newTypes[prefix] = {
+        icon: getEntityIcon(prefix),
+        color: generateEntityColor(prefix),
+        label: label
+      };
+    }
+  }
+
+  // Always include "Other" as catchall
+  newTypes.other = {
+    icon: '◇',
+    color: '#6a6a80',
+    label: 'Other'
+  };
+
+  entityTypes = newTypes;
+}
+
+function classifyEntity(id) {
+  // Check for delimiter-based prefix (priority order: :, /, -)
+  let prefix = null;
+  if (id.includes(':')) {
+    prefix = id.split(':')[0];
+  } else if (id.includes('/')) {
+    prefix = id.split('/')[0];
+  } else if (id.includes('-')) {
+    // For -, only split on first occurrence
+    prefix = id.split('-')[0];
+  }
+
+  // Return prefix if it's a recognized type
+  if (prefix && entityTypes[prefix]) {
+    return prefix;
+  }
+
+  return 'other';
+}
+
+function timeAgo(ts) {
+  const diff = Date.now() - new Date(ts).getTime();
+  if (diff < 5000) return 'just now';
+  if (diff < 60000) return Math.floor(diff/1000) + 's ago';
+  if (diff < 3600000) return Math.floor(diff/60000) + 'm ago';
+  if (diff < 86400000) return Math.floor(diff/3600000) + 'h ago';
+  return Math.floor(diff/86400000) + 'd ago';
+}
+
+function isStale(ts) {
+  return (Date.now() - new Date(ts).getTime()) > STALE_THRESHOLD;
+}
+
+function formatValue(v) {
+  if (typeof v === 'number') return Number.isInteger(v) ? v.toString() : v.toFixed(2);
+  if (typeof v === 'boolean') return v ? '✓' : '✗';
+  if (Array.isArray(v)) return v.map(i => typeof i === 'object' && i !== null ? JSON.stringify(i) : String(i)).join(', ');
+  if (typeof v === 'object' && v !== null) return JSON.stringify(v);
+  return String(v);
+}
+
+function getBarColor(val) {
+  if (val < 40) return 'var(--green)';
+  if (val < 70) return 'var(--yellow)';
+  return 'var(--red)';
+}
+
+function isPercentLike(key, val) {
+  return typeof val === 'number' && (key.includes('percent') || key.includes('humidity')) && val >= 0 && val <= 100;
+}
+
+function updatePipeline() {
+  const now = Date.now();
+  const flowing = (now - lastFlowTime) < 2000;
+
+  // Highlight active pipeline nodes based on recent activity
+  document.getElementById('pipeEvents').classList.toggle('active', flowing);
+  document.getElementById('pipeEngine').classList.toggle('active', flowing);
+}
+
+function updateMetrics(msg) {
+  // Update metrics from server
+  document.getElementById('pipeEntityCount').textContent = msg.entities.total;
+  document.getElementById('pipeEps').textContent = msg.events.rate_per_second.toFixed(1);
+  document.getElementById('pipeTotalEvents').textContent = msg.events.total.toLocaleString();
+  document.getElementById('pipeActiveCount').textContent = msg.publishers.active;
+  document.getElementById('pipeWsClients').textContent = msg.websocket.connections;
+
+  // Update visual flow state based on event rate
+  const flowing = msg.events.rate_per_second > 0;
+  document.getElementById('pipePublishers').classList.toggle('active', msg.publishers.active > 0);
+  document.querySelectorAll('.pipe-arrow').forEach(a => {
+    a.classList.toggle('flowing', flowing);
+  });
+}
+
+const MAX_VISIBLE_ENTITIES = 20; // per group before auto-collapse
+const collapsedGroups = new Set();
+
+let entitySearchFilter = '';
+
+function renderFilterBar() {
+  const filterEl = document.getElementById('entityFilter');
+  // Count entities per type
+  const counts = {};
+  for (const [id] of Object.entries(entities)) {
+    const type = classifyEntity(id);
+    counts[type] = (counts[type] || 0) + 1;
+  }
+
+  // Sort types: alphabetically, but "Other" always last
+  const sortedTypes = Object.entries(entityTypes).sort(([a], [b]) => {
+    if (a === 'other') return 1;
+    if (b === 'other') return -1;
+    return a.localeCompare(b);
+  });
+
+  filterEl.innerHTML = `
+    <input class="filter-search" type="text" placeholder="🔍 Filter entities..." value="${entitySearchFilter}" oninput="entitySearchFilter=this.value;renderEntities()">
+    ${sortedTypes.map(([type, cfg]) => {
+      const count = counts[type] || 0;
+      if (count === 0) return ''; // Don't show empty types
+      const isHidden = hiddenTypes.has(type);
+      return `<span class="filter-chip ${isHidden ? 'hidden' : 'active'}" onclick="toggleTypeFilter('${type}')">${cfg.icon} ${cfg.label} (${count})</span>`;
+    }).join('')}
+  `;
+}
+
+function toggleTypeFilter(type) {
+  if (hiddenTypes.has(type)) hiddenTypes.delete(type);
+  else hiddenTypes.add(type);
+  renderFilterBar();
+  renderEntities();
+}
+
+function renderEntities() {
+  const groups = {};
+  for (const [id, entity] of Object.entries(entities)) {
+    if (entitySearchFilter && !id.toLowerCase().includes(entitySearchFilter.toLowerCase())) continue;
+    const type = classifyEntity(id);
+    if (hiddenTypes.has(type)) continue;
+    if (!groups[type]) groups[type] = [];
+    groups[type].push({ id, ...entity });
+  }
+
+  const container = document.getElementById('entityGroups');
+  // Preserve expanded entity state
+  const expanded = new Set();
+  container.querySelectorAll('.entity-node.expanded').forEach(el => {
+    expanded.add(el.id.replace('entity-', ''));
+  });
+
+  container.innerHTML = '';
+
+  // Sort types: alphabetically, but "Other" always last
+  const sortedTypes = Object.entries(entityTypes).sort(([a], [b]) => {
+    if (a === 'other') return 1;
+    if (b === 'other') return -1;
+    return a.localeCompare(b);
+  });
+
+  for (const [type, cfg] of sortedTypes) {
+    if (!groups[type] || groups[type].length === 0) continue;
+    
+    const items = groups[type].sort((a, b) => b.lastUpdated - a.lastUpdated);
+    const autoCollapse = items.length > MAX_VISIBLE_ENTITIES;
+    const isCollapsed = collapsedGroups.has(type) || (autoCollapse && !collapsedGroups.has('_expanded_' + type));
+    
+    const group = document.createElement('div');
+    group.className = 'entity-group' + (isCollapsed ? ' collapsed' : '');
+    
+    const activeCount = items.filter(e => !isStale(e.lastUpdated)).length;
+    const warningCount = items.filter(e => e.properties?.status === 'warning').length;
+    
+    const displayItems = isCollapsed ? [] : items.slice(0, 200); // hard cap at 200 rendered
+    
+    group.innerHTML = `
+      <div class="group-label" onclick="toggleGroup('${type}')">
+        <span class="group-toggle">▼</span>
+        <span class="group-icon" style="background:${cfg.color}22;color:${cfg.color}">${cfg.icon}</span>
+        ${cfg.label} (${items.length})
+      </div>
+      <div class="group-summary">${activeCount} active${warningCount ? ', ' + warningCount + ' warning' : ''} — click to expand</div>
+      ${displayItems.map(e => {
+        const status = e.properties?.status || '';
+        const stale = isStale(e.lastUpdated);
+        const exp = expanded.has(e.id) ? ' expanded' : '';
+        return `
+          <div class="entity-node${stale ? ' stale' : ''}${exp}" id="entity-${e.id}" onclick="toggleEntity('${e.id}')">
+            <div class="entity-header">
+              <span class="entity-name">${e.id}</span>
+              ${status ? `<span class="entity-status ${status}">${status}</span>` : ''}
+              <button class="history-btn" onclick="showHistory('${e.id}');event.stopPropagation()" title="View event history">⟳</button>
+            </div>
+            <div class="entity-time">${timeAgo(e.lastUpdated)}</div>
+            <div class="entity-props">
+              ${Object.entries(e.properties || {}).sort(([a],[b]) => a.localeCompare(b)).map(([k, v]) => `
+                <div class="prop-row">
+                  <span class="prop-key">${k}</span>
+                  <span class="prop-val" id="prop-${e.id}-${k}">${formatValue(v)}</span>
+                </div>
+                ${isPercentLike(k, v) ? `
+                  <div class="prop-bar">
+                    <div class="prop-bar-fill" style="width:${v}%;background:${getBarColor(v)}"></div>
+                  </div>
+                ` : ''}
+              `).join('')}
+            </div>
+          </div>
+        `;
+      }).join('')}
+      ${!isCollapsed && items.length > 200 ? `<div class="group-summary" style="display:block">...and ${items.length - 200} more</div>` : ''}
+    `;
+    container.appendChild(group);
+  }
+}
+
+function toggleGroup(type) {
+  const wasCollapsed = collapsedGroups.has(type);
+  if (wasCollapsed) {
+    collapsedGroups.delete(type);
+    collapsedGroups.add('_expanded_' + type);
+  } else {
+    collapsedGroups.add(type);
+    collapsedGroups.delete('_expanded_' + type);
+  }
+  renderEntities();
+}
+
+function toggleEntity(id) {
+  const el = document.getElementById(`entity-${id}`);
+  if (el) el.classList.toggle('expanded');
+}
+
+function flashEntity(entityId) {
+  const el = document.getElementById(`entity-${entityId}`);
+  if (el) {
+    el.classList.remove('stale');
+    el.classList.add('flash');
+    setTimeout(() => el.classList.remove('flash'), 800);
+  }
+}
+
+// WS throttle — buffer updates and flush on RAF
+let pendingUpdates = [];
+let renderScheduled = false;
+let newEntitySeen = false;
+let streamEventBuffer = [];
+const MAX_STREAM_EVENTS_PER_FRAME = 5;
+
+function updateProperty(entityId, property, value, timestamp) {
+  if (!entities[entityId]) {
+    entities[entityId] = { properties: {}, lastUpdated: timestamp };
+    newEntitySeen = true;
+  }
+  entities[entityId].properties[property] = value;
+  entities[entityId].lastUpdated = timestamp;
+
+  const now = Date.now();
+  lastFlowTime = now;
+  eventCount++;
+
+  // Buffer stream events
+  streamEventBuffer.push({ entityId, property, value, timestamp });
+
+  // Schedule a render frame if not already scheduled
+  if (!renderScheduled) {
+    renderScheduled = true;
+    requestAnimationFrame(flushUpdates);
+  }
+}
+
+function flushUpdates() {
+  renderScheduled = false;
+
+  // Update pipeline stats
+  updatePipeline();
+  
+  // Update event count display
+  document.getElementById('eventCount').textContent = eventCount + ' events';
+  
+  // Collect entities to flash — applied after render so DOM elements exist
+  const toFlash = new Set();
+  for (const { entityId } of streamEventBuffer) {
+    toFlash.add(entityId);
+  }
+
+  // Add stream events (limited per frame)
+  const container = document.getElementById('streamEvents');
+  const eventsToShow = streamEventBuffer.slice(-MAX_STREAM_EVENTS_PER_FRAME);
+  for (const { entityId, property, value, timestamp } of eventsToShow) {
+    const time = new Date(timestamp).toLocaleTimeString();
+    const div = document.createElement('div');
+    div.className = 'stream-event';
+    div.innerHTML = `
+      <span class="event-time">${time}</span>
+      <span class="event-entity">${entityId}</span>.<span class="event-prop">${property}</span> = <span class="event-value">${formatValue(value)}</span>
+    `;
+    container.insertBefore(div, container.firstChild);
+  }
+  while (container.children.length > 200) container.removeChild(container.lastChild);
+  streamEventBuffer = [];
+
+  // Re-render entities on every flush; only recompute types when new ones appear
+  if (newEntitySeen) {
+    newEntitySeen = false;
+    detectEntityTypes();
+    renderFilterBar();
+  }
+  renderEntities();
+
+  // Flash after render so the newly-created DOM elements receive the class
+  for (const entityId of toFlash) {
+    flashEntity(entityId);
+  }
+}
+
+// Load initial state
+async function loadState() {
+  try {
+    const url = activeServerPrefix ? `/api/state/entities?prefix=${encodeURIComponent(activeServerPrefix)}` : '/api/state/entities';
+    const resp = await fetch(url);
+    const data = await resp.json();
+    for (const e of data) {
+      entities[e.id] = { properties: e.properties, lastUpdated: e.lastUpdated };
+    }
+    detectEntityTypes(); // Compute dynamic types from loaded entities
+    renderFilterBar();
+    renderEntities();
+    updatePipeline();
+  } catch (e) {
+    console.error('Failed to load state:', e);
+  }
+}
+
+// WebSocket
+function connectWS() {
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const ws = new WebSocket(`${proto}//${location.host}`);
+  
+  ws.onopen = () => {
+    document.getElementById('wsStatus').className = 'status-dot';
+    document.getElementById('wsLabel').textContent = 'Live';
+    ws.send(JSON.stringify({ type: 'subscribe', entity_id: '*' }));
+    // Re-sync state on reconnect (handles Flux restarts)
+    entities = {};
+    eventCount = 0;
+    loadState();
+  };
+  
+  ws.onmessage = (event) => {
+    try {
+      const msg = JSON.parse(event.data);
+      if (msg.type === 'state_update') {
+        updateProperty(msg.entity_id, msg.property, msg.value, msg.timestamp);
+      } else if (msg.type === 'metrics_update') {
+        updateMetrics(msg);
+      } else if (msg.type === 'entity_deleted') {
+        delete entities[msg.entity_id];
+        renderFilterBar();
+        renderEntities();
+      }
+    } catch (e) {}
+  };
+  
+  ws.onclose = () => {
+    document.getElementById('wsStatus').className = 'status-dot disconnected';
+    document.getElementById('wsLabel').textContent = 'Reconnecting…';
+    setTimeout(connectWS, 3000);
+  };
+  
+  ws.onerror = () => ws.close();
+}
+
+// Periodic updates
+setInterval(() => {
+  // Refresh time-ago and stale state
+  for (const [id, e] of Object.entries(entities)) {
+    const el = document.getElementById(`entity-${id}`);
+    if (el) {
+      const timeEl = el.querySelector('.entity-time');
+      if (timeEl) timeEl.textContent = timeAgo(e.lastUpdated);
+      el.classList.toggle('stale', isStale(e.lastUpdated));
+    }
+  }
+  updatePipeline();
+}, 5000);
+
+// Server-side prefix filtering
+let activeServerPrefix = '';
+
+function applyServerPrefix() {
+  activeServerPrefix = document.getElementById('serverPrefix').value.trim();
+  entities = {};
+  eventCount = 0;
+  loadState();
+}
+
+// Note: Namespace listing (GET /api/namespaces) not implemented
+// Only individual lookup (GET /api/namespaces/:name) exists
+// Could be added in future for namespace discovery
+
+loadState();
+connectWS();
+
+// ============ Connectors Panel ============
+
+const CONNECTOR_ICONS = {
+  github: '🐙',
+  gmail: '📧',
+  linkedin: '💼',
+  calendar: '📅'
+};
+
+function toggleConnectors() {
+  const panel = document.getElementById('connectorsPanel');
+  const visible = panel.classList.toggle('visible');
+  if (visible) document.getElementById('configPanel').classList.remove('visible');
+}
+
+function toggleConfig() {
+  const panel = document.getElementById('configPanel');
+  const visible = panel.classList.toggle('visible');
+  if (visible) {
+    document.getElementById('connectorsPanel').classList.remove('visible');
+    loadAdminConfig();
+  }
+}
+
+async function loadAdminConfig() {
+  const feedback = document.getElementById('configFeedback');
+  feedback.className = 'config-feedback';
+  try {
+    const resp = await fetch('/api/admin/config');
+    if (!resp.ok) {
+      feedback.textContent = `Failed to load config (${resp.status})`;
+      feedback.className = 'config-feedback err';
+      return;
+    }
+    const cfg = await resp.json();
+    document.getElementById('cfgRateLimitEnabled').checked = !!cfg.rate_limit_enabled;
+    document.getElementById('cfgRateLimit').value = cfg.rate_limit_per_namespace_per_minute ?? '';
+    document.getElementById('cfgBodySingle').value = cfg.body_size_limit_single_bytes ?? '';
+    document.getElementById('cfgBodyBatch').value = cfg.body_size_limit_batch_bytes ?? '';
+  } catch(e) {
+    feedback.textContent = 'Network error loading config';
+    feedback.className = 'config-feedback err';
+  }
+}
+
+async function saveAdminConfig() {
+  const token = document.getElementById('configToken').value.trim();
+  const feedback = document.getElementById('configFeedback');
+  feedback.className = 'config-feedback';
+
+  const body = {
+    rate_limit_enabled: document.getElementById('cfgRateLimitEnabled').checked,
+    rate_limit_per_namespace_per_minute: parseInt(document.getElementById('cfgRateLimit').value) || null,
+    body_size_limit_single_bytes: parseInt(document.getElementById('cfgBodySingle').value) || null,
+    body_size_limit_batch_bytes: parseInt(document.getElementById('cfgBodyBatch').value) || null,
+  };
+  for (const k of Object.keys(body)) { if (body[k] === null) delete body[k]; }
+
+  const headers = { 'Content-Type': 'application/json' };
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+
+  try {
+    const resp = await fetch('/api/admin/config', {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify(body)
+    });
+    if (resp.ok) {
+      feedback.textContent = '✓ Config saved';
+      feedback.className = 'config-feedback ok';
+      setTimeout(() => { feedback.className = 'config-feedback'; }, 3000);
+    } else {
+      const data = await resp.json().catch(() => ({}));
+      feedback.textContent = data.error || `Error ${resp.status}`;
+      feedback.className = 'config-feedback err';
+    }
+  } catch(e) {
+    feedback.textContent = 'Network error';
+    feedback.className = 'config-feedback err';
+  }
+}
+
+async function loadConnectorStatus() {
+  try {
+    const resp = await fetch('/api/connector-manager/connectors');
+    if (!resp.ok) return;
+    const data = await resp.json();
+    renderConnectors(Array.isArray(data) ? data : (data.connectors || []));
+  } catch(e) {
+    document.getElementById('connectorsList').innerHTML =
+      '<div style="font-size:12px;color:var(--text-dim);text-align:center;padding:8px 0">Unavailable</div>';
+  }
+}
+
+function renderConnectors(connectors) {
+  const el = document.getElementById('connectorsList');
+  if (!connectors.length) {
+    el.innerHTML = '<div style="font-size:12px;color:var(--text-dim);text-align:center;padding:8px 0">No connectors found</div>';
+    return;
+  }
+
+  el.innerHTML = connectors.map(c => {
+    const ctype = c.type || 'builtin';
+    const icon = CONNECTOR_ICONS[c.name.toLowerCase()] || (ctype === 'generic' ? '🌐' : ctype === 'named' ? '🎵' : '🔌');
+    const typeBadge = `<span style="font-size:9px;padding:1px 5px;border-radius:8px;background:rgba(108,92,231,0.12);color:var(--accent);margin-left:4px">${ctype}</span>`;
+
+    if (ctype === 'named') {
+      let statusBg, statusFg;
+      if (c.status === 'running') {
+        statusBg = 'rgba(0,210,160,0.12)'; statusFg = 'var(--green)';
+      } else if (c.status === 'error') {
+        statusBg = 'rgba(255,107,107,0.12)'; statusFg = 'var(--red)';
+      } else {
+        statusBg = 'rgba(106,106,128,0.15)'; statusFg = 'var(--text-dim)';
+      }
+      const statusBadge = `<span class="connector-badge" style="background:${statusBg};color:${statusFg}">${c.status}</span>`;
+      const errMsg = c.last_error ? `<div style="font-size:10px;color:var(--red);margin-top:3px;word-break:break-all">${c.last_error}</div>` : '';
+      return `
+        <div class="connector-row" style="flex-wrap:wrap">
+          <div class="connector-info">
+            <span class="connector-icon">${icon}</span>
+            <span class="connector-name">${c.name}</span>
+            ${typeBadge}
+            ${statusBadge}
+            <button onclick="syncNamedSource('${c.source_id}')" style="margin-left:auto;padding:2px 8px;font-size:11px;background:rgba(76,195,247,0.12);border:1px solid rgba(76,195,247,0.3);border-radius:4px;color:var(--blue);cursor:pointer">Sync Now</button>
+            <button onclick="deleteNamedSource('${c.source_id}')" style="margin-left:6px;padding:2px 8px;font-size:11px;background:rgba(255,107,107,0.15);border:1px solid rgba(255,107,107,0.3);border-radius:4px;color:var(--red);cursor:pointer">Remove</button>
+          </div>
+          ${errMsg}
+        </div>
+      `;
+    }
+
+    if (ctype === 'generic') {
+      let statusBg, statusFg;
+      if (c.status === 'running') {
+        statusBg = 'rgba(0,210,160,0.12)'; statusFg = 'var(--green)';
+      } else if (c.status === 'error') {
+        statusBg = 'rgba(255,107,107,0.12)'; statusFg = 'var(--red)';
+      } else {
+        statusBg = 'rgba(106,106,128,0.15)'; statusFg = 'var(--text-dim)';
+      }
+      const statusBadge = `<span class="connector-badge" style="background:${statusBg};color:${statusFg}">${c.status}</span>`;
+      const errMsg = c.last_error ? `<div style="font-size:10px;color:var(--red);margin-top:3px;word-break:break-all">${c.last_error}</div>` : '';
+      return `
+        <div class="connector-row" style="flex-wrap:wrap">
+          <div class="connector-info">
+            <span class="connector-icon">${icon}</span>
+            <span class="connector-name">${c.name}</span>
+            ${typeBadge}
+            ${statusBadge}
+            <button onclick="deleteGenericSource('${c.source_id}')" style="margin-left:auto;padding:2px 8px;font-size:11px;background:rgba(255,107,107,0.15);border:1px solid rgba(255,107,107,0.3);border-radius:4px;color:var(--red);cursor:pointer">Remove</button>
+          </div>
+          ${errMsg}
+        </div>
+      `;
+    }
+
+    // Builtin connector — PAT form
+    const connected = c.enabled && (c.status === 'configured' || c.status === 'running');
+    const badge = connected
+      ? '<span class="connector-badge connected">Connected</span>'
+      : '<span class="connector-badge not-connected">Not Connected</span>';
+    const action = connected
+      ? `<a href="#" class="disconnect" onclick="confirmDisconnect('${c.name}');return false">Disconnect</a>`
+      : `<a href="#" onclick="showPatForm('${c.name}');return false">Connect</a>`;
+
+    return `
+      <div class="connector-row" id="connector-row-${c.name}" style="flex-wrap:wrap">
+        <div class="connector-info" id="connector-info-${c.name}">
+          <span class="connector-icon">${icon}</span>
+          <span class="connector-name">${c.name.charAt(0).toUpperCase() + c.name.slice(1)}</span>
+          ${typeBadge}
+          ${badge}
+        </div>
+        <div class="connector-action" id="connector-action-${c.name}">${action}</div>
+        <div id="pat-form-${c.name}" style="display:none;width:100%;margin-top:6px">
+          <div style="display:flex;gap:5px;align-items:center">
+            <input id="pat-input-${c.name}" type="password" placeholder="Personal access token"
+              style="flex:1;font-size:11px;padding:3px 6px;background:var(--bg-dark,#0d1117);color:var(--text);border:1px solid var(--border);border-radius:4px;min-width:0;outline:none">
+            <a href="#" onclick="submitPat('${c.name}');return false" style="font-size:11px;color:var(--accent2);text-decoration:none;padding:3px 8px;border:1px solid var(--border);border-radius:4px;white-space:nowrap">Connect</a>
+            <a href="#" onclick="cancelPatForm('${c.name}');return false" style="font-size:11px;color:var(--text-dim);text-decoration:none">Cancel</a>
+          </div>
+          <div id="pat-error-${c.name}" style="font-size:10px;color:var(--red);margin-top:3px;display:none"></div>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+function showPatForm(name) {
+  document.getElementById('connector-action-' + name).style.display = 'none';
+  document.getElementById('pat-form-' + name).style.display = 'block';
+  document.getElementById('pat-input-' + name).focus();
+}
+
+function cancelPatForm(name) {
+  document.getElementById('pat-form-' + name).style.display = 'none';
+  document.getElementById('pat-error-' + name).style.display = 'none';
+  document.getElementById('connector-action-' + name).style.display = '';
+}
+
+async function submitPat(name) {
+  const input = document.getElementById('pat-input-' + name);
+  const token = input.value.trim();
+  if (!token) return;
+
+  const errEl = document.getElementById('pat-error-' + name);
+  errEl.style.display = 'none';
+
+  try {
+    const resp = await fetch(`/api/connectors/${name}/token`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token })
+    });
+
+    if (resp.ok) {
+      input.value = '';
+      cancelPatForm(name);
+      loadConnectorStatus();
+    } else {
+      const data = await resp.json().catch(() => ({}));
+      errEl.textContent = data.error || 'Failed to connect';
+      errEl.style.display = 'block';
+    }
+  } catch(e) {
+    errEl.textContent = 'Network error';
+    errEl.style.display = 'block';
+  }
+}
+
+async function confirmDisconnect(name) {
+  if (!confirm(`Disconnect ${name}? This will remove your stored credentials.`)) return;
+
+  try {
+    const resp = await fetch(`/api/connectors/${name}/token`, { method: 'DELETE' });
+    if (resp.ok) {
+      loadConnectorStatus();
+    } else {
+      const data = await resp.json().catch(() => ({}));
+      alert(data.error || 'Failed to disconnect');
+    }
+  } catch(e) {
+    alert('Network error');
+  }
+}
+
+// ============ Generic Source Form ============
+
+async function deleteGenericSource(sourceId) {
+  if (!confirm('Remove this source?')) return;
+  const resp = await fetch(`/api/connector-manager/connectors/generic/${sourceId}`, { method: 'DELETE' });
+  if (resp.ok || resp.status === 204) loadConnectorStatus();
+}
+
+async function syncNamedSource(sourceId) {
+  const resp = await fetch(`/api/connector-manager/connectors/named/${sourceId}/sync`, { method: 'POST' });
+  if (resp.ok || resp.status === 202) loadConnectorStatus();
+}
+
+async function deleteNamedSource(sourceId) {
+  if (!confirm('Remove this source?')) return;
+  const resp = await fetch(`/api/connector-manager/connectors/named/${sourceId}`, { method: 'DELETE' });
+  if (resp.ok || resp.status === 204) loadConnectorStatus();
+}
+
+function toggleGenericForm() {
+  const form = document.getElementById('genericSourceForm');
+  form.style.display = form.style.display === 'none' ? '' : 'none';
+}
+
+function toggleNamedForm() {
+  const form = document.getElementById('namedSourceForm');
+  form.style.display = form.style.display === 'none' ? '' : 'none';
+}
+
+async function addNamedSource() {
+  const tapName = document.getElementById('nsTapName').value.trim();
+  const namespace = document.getElementById('nsNamespace').value.trim() || 'personal';
+  const entityKeyField = document.getElementById('nsEntityKeyField').value.trim();
+  const poll = parseInt(document.getElementById('nsPoll').value) || 3600;
+  const configJson = document.getElementById('nsConfigJson').value.trim();
+  const fluxToken = document.getElementById('nsFluxToken').value.trim();
+  const feedback = document.getElementById('nsFormFeedback');
+
+  if (!tapName || !entityKeyField || !configJson) {
+    feedback.textContent = 'Tap name, entity key field, and config JSON are required';
+    feedback.className = 'config-feedback err';
+    return;
+  }
+
+  try { JSON.parse(configJson); } catch(e) {
+    feedback.textContent = 'Config JSON is invalid: ' + e.message;
+    feedback.className = 'config-feedback err';
+    return;
+  }
+
+  const body = { tap_name: tapName, namespace, entity_key_field: entityKeyField, config_json: configJson, poll_interval_secs: poll, flux_namespace_token: fluxToken || null };
+  feedback.className = 'config-feedback';
+  try {
+    const resp = await fetch('/api/connector-manager/connectors/named', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (resp.ok) {
+      feedback.textContent = `✓ Source added (ID: ${data.source_id})`;
+      feedback.className = 'config-feedback ok';
+      document.getElementById('nsTapName').value = '';
+      document.getElementById('nsNamespace').value = 'personal';
+      document.getElementById('nsEntityKeyField').value = '';
+      document.getElementById('nsPoll').value = '3600';
+      document.getElementById('nsConfigJson').value = '';
+      document.getElementById('nsFluxToken').value = '';
+      loadConnectorStatus();
+    } else {
+      feedback.textContent = data.error || `Error ${resp.status}`;
+      feedback.className = 'config-feedback err';
+    }
+  } catch(e) {
+    feedback.textContent = 'Network error';
+    feedback.className = 'config-feedback err';
+  }
+}
+
+function onAuthTypeChange() {
+  const authType = document.getElementById('gsAuthType').value;
+  document.getElementById('gsTokenField').style.display = authType !== 'none' ? '' : 'none';
+  document.getElementById('gsHeaderNameField').style.display = authType === 'api_key' ? '' : 'none';
+}
+
+async function addGenericSource() {
+  const name = document.getElementById('gsName').value.trim();
+  const url = document.getElementById('gsUrl').value.trim();
+  const poll = parseInt(document.getElementById('gsPoll').value) || 300;
+  const entityKey = document.getElementById('gsEntityKey').value.trim();
+  const namespace = document.getElementById('gsNamespace').value.trim() || 'personal';
+  const authType = document.getElementById('gsAuthType').value;
+  const token = document.getElementById('gsToken').value.trim();
+  const headerName = document.getElementById('gsHeaderName').value.trim();
+  const fluxToken = document.getElementById('gsFluxToken').value.trim();
+  const feedback = document.getElementById('gsFormFeedback');
+
+  if (!name || !url || !entityKey) {
+    feedback.textContent = 'Name, URL, and Entity Key are required';
+    feedback.className = 'config-feedback err';
+    return;
+  }
+
+  let authTypeBody;
+  if (authType === 'bearer') {
+    authTypeBody = 'bearer';
+  } else if (authType === 'api_key') {
+    authTypeBody = { api_key_header: headerName || 'X-API-Key' };
+  } else {
+    authTypeBody = 'none';
+  }
+
+  const body = {
+    name, url,
+    poll_interval_secs: poll,
+    entity_key: entityKey,
+    namespace,
+    auth_type: authTypeBody,
+    flux_namespace_token: fluxToken || null,
+  };
+  if (token && authType !== 'none') body.token = token;
+
+  feedback.className = 'config-feedback';
+  try {
+    const resp = await fetch('/api/connector-manager/connectors/generic', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (resp.ok) {
+      feedback.textContent = `✓ Source added (ID: ${data.source_id})`;
+      feedback.className = 'config-feedback ok';
+      document.getElementById('gsName').value = '';
+      document.getElementById('gsUrl').value = '';
+      document.getElementById('gsPoll').value = '300';
+      document.getElementById('gsEntityKey').value = '';
+      document.getElementById('gsNamespace').value = 'personal';
+      document.getElementById('gsAuthType').value = 'none';
+      document.getElementById('gsToken').value = '';
+      document.getElementById('gsHeaderName').value = '';
+      document.getElementById('gsFluxToken').value = '';
+      onAuthTypeChange();
+      loadConnectorStatus();
+    } else {
+      feedback.textContent = data.error || `Error ${resp.status}`;
+      feedback.className = 'config-feedback err';
+    }
+  } catch(e) {
+    feedback.textContent = 'Network error';
+    feedback.className = 'config-feedback err';
+  }
+}
+
+// Load connector status on page load and every 30 seconds
+loadConnectorStatus();
+setInterval(loadConnectorStatus, 30000);
+
+// ============ History Modal ============
+
+async function showHistory(entityId) {
+  const modal = document.getElementById('historyModal');
+  document.getElementById('historyEntityId').textContent = entityId;
+  document.getElementById('historyContent').innerHTML =
+    '<div style="color:var(--text-dim);text-align:center;padding:24px">Loading…</div>';
+  modal.style.display = 'flex';
+
+  try {
+    const resp = await fetch(`/api/events?entity=${encodeURIComponent(entityId)}&limit=100`);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const events = await resp.json();
+
+    if (!events.length) {
+      document.getElementById('historyContent').innerHTML =
+        '<div style="color:var(--text-dim);text-align:center;padding:24px">No events in last 24h</div>';
+      return;
+    }
+
+    document.getElementById('historyContent').innerHTML = events.map(ev => {
+      const ts = new Date(ev.timestamp).toLocaleString();
+      const payloadStr = JSON.stringify(ev.payload, null, 2);
+      return `
+        <div style="padding:8px 6px;border-bottom:1px solid var(--border)">
+          <div style="display:flex;gap:8px;align-items:center;margin-bottom:4px;flex-wrap:wrap">
+            <span style="color:var(--blue)">${escHtml(ev.stream)}</span>
+            <span style="color:var(--text-dim)">·</span>
+            <span style="color:var(--text-dim)">${escHtml(ev.source)}</span>
+            <span style="color:var(--text-dim);margin-left:auto;font-size:10px">${escHtml(ts)}</span>
+          </div>
+          <pre style="margin:0;white-space:pre-wrap;word-break:break-all;color:var(--text);font-size:10px;background:var(--bg3);border-radius:4px;padding:6px;line-height:1.5">${escHtml(payloadStr)}</pre>
+        </div>
+      `;
+    }).join('');
+  } catch(e) {
+    document.getElementById('historyContent').innerHTML =
+      `<div style="color:var(--red);text-align:center;padding:24px">Error: ${escHtml(e.message)}</div>`;
+  }
+}
+
+function closeHistory() {
+  document.getElementById('historyModal').style.display = 'none';
+}
+
+// Close modal on backdrop click
+document.getElementById('historyModal').addEventListener('click', function(e) {
+  if (e.target === this) closeHistory();
+});
+
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+</script>
+</body>
+</html>
