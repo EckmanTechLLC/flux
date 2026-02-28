@@ -4,8 +4,8 @@ const path = require('path');
 const url = require('url');
 
 const DIST = path.join(__dirname, 'dist');
-const FLUX_API = 'http://localhost:3000';
-const PORT = 8080;
+const FLUX_API = process.env.FLUX_API || 'http://localhost:3000';
+const PORT = parseInt(process.env.PORT || '8082');
 
 const MIME = {
   '.html': 'text/html',
