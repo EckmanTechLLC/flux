@@ -445,6 +445,19 @@
     gap: 8px;
   }
 
+  .stream-pause-btn {
+    background: none;
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    border-radius: 4px;
+    padding: 2px 7px;
+    font-size: 11px;
+    cursor: pointer;
+    line-height: 1.6;
+  }
+  .stream-pause-btn:hover { border-color: var(--accent); color: var(--text); }
+  .stream-pause-btn.paused { border-color: var(--yellow); color: var(--yellow); }
+
   .stream-header .count {
     margin-left: auto;
     font-size: 11px;
@@ -822,6 +835,7 @@
   <div class="stream-panel">
     <div class="stream-header">
       ⚡ Event Stream
+      <button class="stream-pause-btn" id="streamPauseBtn" onclick="toggleStreamPause()" title="Pause event stream">⏸</button>
       <span class="count" id="eventCount">0 events</span>
     </div>
     <div class="stream-events" id="streamEvents"></div>
@@ -1292,6 +1306,16 @@ let renderScheduled = false;
 let newEntitySeen = false;
 let streamEventBuffer = [];
 const MAX_STREAM_EVENTS_PER_FRAME = 5;
+let streamPaused = false;
+
+function toggleStreamPause() {
+  streamPaused = !streamPaused;
+  streamEventBuffer = [];
+  const btn = document.getElementById('streamPauseBtn');
+  btn.textContent = streamPaused ? '▶' : '⏸';
+  btn.title = streamPaused ? 'Resume event stream' : 'Pause event stream';
+  btn.classList.toggle('paused', streamPaused);
+}
 
 function updateProperty(entityId, property, value, timestamp) {
   if (!entities[entityId]) {
@@ -1331,19 +1355,21 @@ function flushUpdates() {
   }
 
   // Add stream events (limited per frame)
-  const container = document.getElementById('streamEvents');
-  const eventsToShow = streamEventBuffer.slice(-MAX_STREAM_EVENTS_PER_FRAME);
-  for (const { entityId, property, value, timestamp } of eventsToShow) {
-    const time = new Date(timestamp).toLocaleTimeString();
-    const div = document.createElement('div');
-    div.className = 'stream-event';
-    div.innerHTML = `
-      <span class="event-time">${time}</span>
-      <span class="event-entity">${entityId}</span>.<span class="event-prop">${property}</span> = <span class="event-value">${formatValue(value)}</span>
-    `;
-    container.insertBefore(div, container.firstChild);
+  if (!streamPaused) {
+    const container = document.getElementById('streamEvents');
+    const eventsToShow = streamEventBuffer.slice(-MAX_STREAM_EVENTS_PER_FRAME);
+    for (const { entityId, property, value, timestamp } of eventsToShow) {
+      const time = new Date(timestamp).toLocaleTimeString();
+      const div = document.createElement('div');
+      div.className = 'stream-event';
+      div.innerHTML = `
+        <span class="event-time">${time}</span>
+        <span class="event-entity">${entityId}</span>.<span class="event-prop">${property}</span> = <span class="event-value">${formatValue(value)}</span>
+      `;
+      container.insertBefore(div, container.firstChild);
+    }
+    while (container.children.length > 200) container.removeChild(container.lastChild);
   }
-  while (container.children.length > 200) container.removeChild(container.lastChild);
   streamEventBuffer = [];
 
   // Re-render entities on every flush; only recompute types when new ones appear
