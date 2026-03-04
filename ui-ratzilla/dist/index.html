@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/firacode/6.2.0/fira_code.min.css" />
+    
+<script type="module">
+import init, * as bindings from '/flux-monitor-9bd0f77016ac9de6.js';
+const wasm = await init({ module_or_path: '/flux-monitor-9bd0f77016ac9de6_bg.wasm' });
+
+
+window.wasmBindings = bindings;
+
+
+dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
+
+</script>
+    <title>⟁ Flux Monitor</title>
+    <style>
+      body {
+        margin: 0;
+        width: 100%;
+        height: 100vh;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        align-content: center;
+        background-color: #0a0a0f;
+      }
+      pre {
+        font-family: "Fira Code", monospace;
+        font-size: 14px;
+        margin: 0px;
+      }
+    </style>
+  <link rel="modulepreload" href="/flux-monitor-9bd0f77016ac9de6.js" crossorigin="anonymous" integrity="sha384-5q2tsX6uXUQByJXD50/NkOXS7nsE04qYFA7Svlb6NJHJOtCPR5xwLKkDQhyz2W0e"><link rel="preload" href="/flux-monitor-9bd0f77016ac9de6_bg.wasm" crossorigin="anonymous" integrity="sha384-SRPJFLeqMYPK1/0kD29j9TC04ZKs7jdLz0thDdMPk/RbVNETnMkAkMpJ14/Mf6Ls" as="fetch" type="application/wasm"></head>
+  <body>
+    <script type="module">
+      window.addEventListener("TrunkApplicationStarted", (_) => {
+        console.log("Flux Monitor initialized");
+      });
+    </script>
+  </body>
+</html>
