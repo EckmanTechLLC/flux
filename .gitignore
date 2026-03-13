@@ -38,3 +38,8 @@ nats-data/
 # Environment
 .env
 .env.local
+
+# Python
+venv/
+__pycache__/
+*.pyc
