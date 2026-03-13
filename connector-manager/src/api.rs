@@ -1,15 +1,23 @@
-//! Connector Manager HTTP API — generic connector endpoints.
+//! Connector Manager HTTP API.
 //!
-//! Exposes four routes:
+//! Routes:
 //! - `POST /api/connectors/generic` — create a new generic (Bento) source
 //! - `DELETE /api/connectors/generic/:source_id` — remove a generic source
-//! - `GET /api/connectors` — list all connectors (builtin + generic + named)
+//! - `POST /api/connectors/named` — create a new named (Singer) source
+//! - `DELETE /api/connectors/named/:source_id` — remove a named source
+//! - `POST /api/connectors/named/:source_id/sync` — trigger one-shot sync
+//! - `POST /api/connectors/i3x` — create a new i3X source
+//! - `DELETE /api/connectors/i3x/:source_id` — remove an i3X source
+//! - `POST /api/connectors/i3x/:source_id/sync` — trigger one-shot i3X sync
+//! - `GET /api/connectors` — list all connectors (builtin + generic + named + i3x)
 //! - `GET /api/connectors/taps` — return the Meltano Hub tap catalog
 
 use crate::generic_config::{AuthType, GenericConfigStore, GenericSourceConfig};
+use crate::i3x_config::{I3xConfigStore, I3xSourceConfig};
 use crate::named_config::NamedSourceConfig;
 use crate::registry::get_all_connectors;
 use crate::runners::generic::GenericRunner;
+use crate::runners::i3x::I3xRunner;
 use crate::runners::named::{NamedRunner, TapCatalogEntry, TapCatalogStore};
 use anyhow::Result;
 use axum::{
@@ -33,6 +41,8 @@ pub struct ApiState {
     pub credential_store: Arc<CredentialStore>,
     pub tap_catalog: Arc<TapCatalogStore>,
     pub named_runner: Arc<NamedRunner>,
+    pub i3x_config_store: Arc<I3xConfigStore>,
+    pub i3x_runner: Arc<I3xRunner>,
 }
 
 /// Auth type as received in the API request body.
@@ -98,6 +108,22 @@ pub struct CreateNamedSourceRequest {
 /// Response for `POST /api/connectors/named`.
 #[derive(Serialize)]
 pub struct CreateNamedSourceResponse {
+    pub source_id: String,
+}
+
+/// Request body for `POST /api/connectors/i3x`.
+#[derive(Deserialize)]
+pub struct CreateI3xSourceRequest {
+    pub name: String,
+    pub base_url: String,
+    pub namespace: String,
+    pub api_key: String,
+    pub flux_namespace_token: String,
+}
+
+/// Response for `POST /api/connectors/i3x`.
+#[derive(Serialize)]
+pub struct CreateI3xSourceResponse {
     pub source_id: String,
 }
 
@@ -227,6 +253,66 @@ pub async fn handle_delete_generic_source(state: &ApiState, source_id: &str) -> 
     Ok(())
 }
 
+/// Creates and starts a new i3X source.
+///
+/// Generates a UUIDv4 source ID, persists config in `I3xConfigStore`,
+/// stores the API key in `CredentialStore` under `user_id="i3x"`, and
+/// starts the SSE streaming task via `I3xRunner`.
+pub async fn handle_create_i3x_source(
+    state: &ApiState,
+    req: CreateI3xSourceRequest,
+) -> Result<String> {
+    let source_id = uuid::Uuid::new_v4().to_string();
+    let config = I3xSourceConfig {
+        id: source_id.clone(),
+        name: req.name,
+        base_url: req.base_url,
+        namespace: req.namespace,
+        flux_namespace_token: req.flux_namespace_token,
+        created_at: Utc::now(),
+    };
+    state.i3x_config_store.insert(&config)?;
+
+    let creds = Credentials {
+        access_token: req.api_key.clone(),
+        refresh_token: None,
+        expires_at: None,
+    };
+    state.credential_store.store("i3x", &source_id, &creds)?;
+
+    state.i3x_runner.start_source(&config, req.api_key).await?;
+    info!(source_id = %source_id, name = %config.name, "i3X source created");
+    Ok(source_id)
+}
+
+/// Stops and removes an i3X source.
+///
+/// Aborts the background SSE task, deletes config from SQLite, and removes
+/// credentials from `CredentialStore` (best-effort).
+pub async fn handle_delete_i3x_source(state: &ApiState, source_id: &str) -> Result<()> {
+    state.i3x_runner.stop_source(source_id).await?;
+    state.i3x_config_store.delete(source_id)?;
+    let _ = state.credential_store.delete("i3x", source_id);
+    info!(source_id = %source_id, "i3X source deleted");
+    Ok(())
+}
+
+/// Triggers a one-shot sync for an i3X source.
+///
+/// Returns `Err` if the source is not found; otherwise fire-and-forget.
+pub async fn handle_sync_i3x_source(state: &ApiState, source_id: &str) -> Result<()> {
+    let config = state
+        .i3x_config_store
+        .get(source_id)?
+        .ok_or_else(|| anyhow::anyhow!("i3X source {} not found", source_id))?;
+    let api_key = state
+        .credential_store
+        .get("i3x", source_id)?
+        .map(|c| c.access_token)
+        .unwrap_or_default();
+    state.i3x_runner.trigger_sync(&config, api_key).await
+}
+
 // ---------------------------------------------------------------------------
 // HTTP handlers
 // ---------------------------------------------------------------------------
@@ -285,6 +371,39 @@ async fn delete_generic_source(
         .await
         .map_err(AppError::from)?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+async fn post_i3x_source(
+    State(state): State<Arc<ApiState>>,
+    Json(req): Json<CreateI3xSourceRequest>,
+) -> Result<(StatusCode, Json<CreateI3xSourceResponse>), AppError> {
+    let source_id = handle_create_i3x_source(&state, req)
+        .await
+        .map_err(AppError::from)?;
+    Ok((
+        StatusCode::CREATED,
+        Json(CreateI3xSourceResponse { source_id }),
+    ))
+}
+
+async fn delete_i3x_source(
+    State(state): State<Arc<ApiState>>,
+    Path(source_id): Path<String>,
+) -> Result<StatusCode, AppError> {
+    handle_delete_i3x_source(&state, &source_id)
+        .await
+        .map_err(AppError::from)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn post_sync_i3x_source(
+    State(state): State<Arc<ApiState>>,
+    Path(source_id): Path<String>,
+) -> Result<StatusCode, AppError> {
+    handle_sync_i3x_source(&state, &source_id)
+        .await
+        .map_err(AppError::from)?;
+    Ok(StatusCode::ACCEPTED)
 }
 
 async fn list_connectors(State(state): State<Arc<ApiState>>) -> Json<Vec<ConnectorInfo>> {
@@ -367,6 +486,37 @@ async fn list_connectors(State(state): State<Arc<ApiState>>) -> Json<Vec<Connect
         });
     }
 
+    // i3X connectors from config store + runner status
+    let i3x_configs = state.i3x_config_store.list().unwrap_or_else(|e| {
+        warn!(error = %e, "Failed to list i3X source configs");
+        vec![]
+    });
+    let i3x_statuses = state.i3x_runner.status();
+
+    for config in i3x_configs {
+        let status_entry = i3x_statuses.iter().find(|s| s.source_id == config.id);
+        let (status, last_started, last_error) = match status_entry {
+            Some(s) => {
+                let st = if s.last_error.is_some() { "error" } else { "running" };
+                (
+                    st.to_string(),
+                    s.last_event.map(|dt| dt.to_rfc3339()),
+                    s.last_error.clone(),
+                )
+            }
+            None => ("stopped".to_string(), None, None),
+        };
+        connectors.push(ConnectorInfo {
+            name: config.name,
+            connector_type: "i3x".to_string(),
+            enabled: true,
+            status,
+            source_id: Some(config.id),
+            last_started,
+            last_error,
+        });
+    }
+
     Json(connectors)
 }
 
@@ -419,6 +569,15 @@ pub fn create_router(state: ApiState) -> Router {
             "/api/connectors/generic/:source_id",
             delete(delete_generic_source),
         )
+        .route("/api/connectors/i3x", post(post_i3x_source))
+        .route(
+            "/api/connectors/i3x/:source_id",
+            delete(delete_i3x_source),
+        )
+        .route(
+            "/api/connectors/i3x/:source_id/sync",
+            post(post_sync_i3x_source),
+        )
         .route("/api/connectors", get(list_connectors))
         .route("/api/connectors/taps", get(get_tap_catalog))
         .with_state(Arc::new(state))
@@ -431,11 +590,13 @@ pub fn create_router(state: ApiState) -> Router {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::i3x_config::I3xConfigStore;
     use crate::named_config::NamedConfigStore;
 
     fn make_state() -> ApiState {
         let config_store = Arc::new(GenericConfigStore::new(":memory:").unwrap());
         let named_store = Arc::new(NamedConfigStore::new(":memory:").unwrap());
+        let i3x_config_store = Arc::new(I3xConfigStore::new(":memory:").unwrap());
         let credential_store = Arc::new(
             CredentialStore::new(":memory:", &base64::encode([0u8; 32])).unwrap(),
         );
@@ -447,6 +608,7 @@ mod tests {
             Arc::clone(&named_store),
             "http://localhost:3000".to_string(),
         ));
+        let i3x_runner = Arc::new(I3xRunner::new("http://localhost:3000".to_string()));
         let tap_catalog = Arc::new(TapCatalogStore::new("/nonexistent/test-catalog.json"));
         ApiState {
             config_store,
@@ -454,6 +616,8 @@ mod tests {
             credential_store,
             tap_catalog,
             named_runner,
+            i3x_config_store,
+            i3x_runner,
         }
     }
 
@@ -551,5 +715,83 @@ mod tests {
         // Config should be gone
         let stored = state.config_store.get(&source_id).unwrap();
         assert!(stored.is_none(), "config should be removed after DELETE");
+    }
+
+    fn make_i3x_request(name: &str) -> CreateI3xSourceRequest {
+        CreateI3xSourceRequest {
+            name: name.to_string(),
+            base_url: "https://demo.i3x.dev".to_string(),
+            namespace: "flux-manufacturing".to_string(),
+            api_key: "test-api-key".to_string(),
+            flux_namespace_token: "tok-abc123".to_string(),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_post_i3x_source_stores_config() {
+        let state = make_state();
+        let source_id = handle_create_i3x_source(&state, make_i3x_request("Factory A"))
+            .await
+            .unwrap();
+
+        let stored = state.i3x_config_store.get(&source_id).unwrap();
+        assert!(stored.is_some(), "config should be stored after POST");
+        let config = stored.unwrap();
+        assert_eq!(config.name, "Factory A");
+        assert_eq!(config.base_url, "https://demo.i3x.dev");
+        assert_eq!(config.namespace, "flux-manufacturing");
+        assert_eq!(config.flux_namespace_token, "tok-abc123");
+    }
+
+    #[tokio::test]
+    async fn test_post_i3x_source_stores_credentials() {
+        let state = make_state();
+        let source_id = handle_create_i3x_source(&state, make_i3x_request("Factory B"))
+            .await
+            .unwrap();
+
+        let creds = state.credential_store.get("i3x", &source_id).unwrap();
+        assert!(creds.is_some(), "credentials should be stored");
+        assert_eq!(creds.unwrap().access_token, "test-api-key");
+    }
+
+    #[tokio::test]
+    async fn test_delete_i3x_source_removes_config() {
+        let state = make_state();
+        let source_id = handle_create_i3x_source(&state, make_i3x_request("Factory C"))
+            .await
+            .unwrap();
+        assert!(
+            state.i3x_config_store.get(&source_id).unwrap().is_some(),
+            "config should exist before delete"
+        );
+
+        handle_delete_i3x_source(&state, &source_id).await.unwrap();
+
+        assert!(
+            state.i3x_config_store.get(&source_id).unwrap().is_none(),
+            "config should be removed after DELETE"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_sync_i3x_source_not_found_returns_error() {
+        let state = make_state();
+        let result = handle_sync_i3x_source(&state, "nonexistent-id").await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("not found"));
+    }
+
+    #[tokio::test]
+    async fn test_i3x_source_appears_in_list() {
+        let state = make_state();
+        handle_create_i3x_source(&state, make_i3x_request("Test i3X"))
+            .await
+            .unwrap();
+
+        let configs = state.i3x_config_store.list().unwrap();
+        assert_eq!(configs.len(), 1);
+        assert_eq!(configs[0].name, "Test i3X");
+        assert_eq!(configs[0].namespace, "flux-manufacturing");
     }
 }

@@ -926,6 +926,31 @@
     <button class="config-save-btn" onclick="addNamedSource()">Add Source</button>
     <div class="config-feedback" id="nsFormFeedback"></div>
   </div>
+  <button onclick="toggleI3xForm()" style="width:100%;padding:6px;margin-top:6px;background:var(--bg3);border:1px solid var(--border);border-radius:6px;color:var(--text-dim);font-size:12px;cursor:pointer;transition:all 0.2s">+ Add i3X Source</button>
+  <div id="i3xSourceForm" style="display:none;margin-top:10px">
+    <div class="config-field">
+      <label class="config-label">Source Name</label>
+      <input id="ixName" type="text" class="config-input" placeholder="Factory Floor">
+    </div>
+    <div class="config-field">
+      <label class="config-label">Base URL</label>
+      <input id="ixBaseUrl" type="text" class="config-input" placeholder="https://demo.i3x.dev">
+    </div>
+    <div class="config-field">
+      <label class="config-label">API Key</label>
+      <input id="ixApiKey" type="password" class="config-input" placeholder="i3X API key">
+    </div>
+    <div class="config-field">
+      <label class="config-label">Flux Namespace</label>
+      <input id="ixNamespace" type="text" class="config-input" placeholder="personal">
+    </div>
+    <div class="config-field">
+      <label class="config-label">Flux Namespace Token</label>
+      <input id="ixFluxToken" type="password" class="config-input" placeholder="Flux namespace token (if auth enabled)">
+    </div>
+    <button class="config-save-btn" onclick="addI3xSource()">Add Source</button>
+    <div class="config-feedback" id="ixFormFeedback"></div>
+  </div>
 </div>
 
 <div class="config-panel" id="configPanel">
@@ -1483,6 +1508,10 @@ const CONNECTOR_ICONS = {
   calendar: '📅'
 };
 
+const CONNECTOR_TYPE_ICONS = {
+  i3x: '🏭'
+};
+
 function toggleConnectors() {
   const panel = document.getElementById('connectorsPanel');
   const visible = panel.classList.toggle('visible');
@@ -1577,7 +1606,7 @@ function renderConnectors(connectors) {
 
   el.innerHTML = connectors.map(c => {
     const ctype = c.type || 'builtin';
-    const icon = CONNECTOR_ICONS[c.name.toLowerCase()] || (ctype === 'generic' ? '🌐' : ctype === 'named' ? '🎵' : '🔌');
+    const icon = CONNECTOR_ICONS[c.name.toLowerCase()] || CONNECTOR_TYPE_ICONS[ctype] || (ctype === 'generic' ? '🌐' : ctype === 'named' ? '🎵' : '🔌');
     const typeBadge = `<span style="font-size:9px;padding:1px 5px;border-radius:8px;background:rgba(108,92,231,0.12);color:var(--accent);margin-left:4px">${ctype}</span>`;
 
     if (ctype === 'named') {
@@ -1625,6 +1654,33 @@ function renderConnectors(connectors) {
             ${typeBadge}
             ${statusBadge}
             <button onclick="deleteGenericSource('${c.source_id}')" style="margin-left:auto;padding:2px 8px;font-size:11px;background:rgba(255,107,107,0.15);border:1px solid rgba(255,107,107,0.3);border-radius:4px;color:var(--red);cursor:pointer">Remove</button>
+          </div>
+          ${errMsg}
+        </div>
+      `;
+    }
+
+    if (ctype === 'i3x') {
+      let statusBg, statusFg;
+      if (c.status === 'running') {
+        statusBg = 'rgba(0,210,160,0.12)'; statusFg = 'var(--green)';
+      } else if (c.status === 'error') {
+        statusBg = 'rgba(255,107,107,0.12)'; statusFg = 'var(--red)';
+      } else {
+        statusBg = 'rgba(106,106,128,0.15)'; statusFg = 'var(--text-dim)';
+      }
+      const statusBadge = `<span class="connector-badge" style="background:${statusBg};color:${statusFg}">${c.status}</span>`;
+      const lastEvent = c.last_started ? `<span style="font-size:10px;color:var(--text-dim);margin-left:6px">${new Date(c.last_started).toLocaleTimeString()}</span>` : '';
+      const errMsg = c.last_error ? `<div style="font-size:10px;color:var(--red);margin-top:3px;word-break:break-all">${c.last_error}</div>` : '';
+      return `
+        <div class="connector-row" style="flex-wrap:wrap">
+          <div class="connector-info">
+            <span class="connector-icon">${icon}</span>
+            <span class="connector-name">${c.name}</span>
+            ${typeBadge}
+            ${statusBadge}
+            ${lastEvent}
+            <button onclick="deleteI3xSource('${c.source_id}')" style="margin-left:auto;padding:2px 8px;font-size:11px;background:rgba(255,107,107,0.15);border:1px solid rgba(255,107,107,0.3);border-radius:4px;color:var(--red);cursor:pointer">Remove</button>
           </div>
           ${errMsg}
         </div>
@@ -1748,6 +1804,59 @@ function toggleGenericForm() {
 function toggleNamedForm() {
   const form = document.getElementById('namedSourceForm');
   form.style.display = form.style.display === 'none' ? '' : 'none';
+}
+
+function toggleI3xForm() {
+  const form = document.getElementById('i3xSourceForm');
+  form.style.display = form.style.display === 'none' ? '' : 'none';
+}
+
+async function deleteI3xSource(sourceId) {
+  if (!confirm('Remove this source?')) return;
+  const resp = await fetch(`/api/connector-manager/connectors/i3x/${sourceId}`, { method: 'DELETE' });
+  if (resp.ok || resp.status === 204) loadConnectorStatus();
+}
+
+async function addI3xSource() {
+  const name = document.getElementById('ixName').value.trim();
+  const baseUrl = document.getElementById('ixBaseUrl').value.trim();
+  const apiKey = document.getElementById('ixApiKey').value.trim();
+  const namespace = document.getElementById('ixNamespace').value.trim() || 'personal';
+  const fluxToken = document.getElementById('ixFluxToken').value.trim();
+  const feedback = document.getElementById('ixFormFeedback');
+
+  if (!name || !baseUrl || !apiKey || !namespace) {
+    feedback.textContent = 'Name, Base URL, API Key, and Namespace are required';
+    feedback.className = 'config-feedback err';
+    return;
+  }
+
+  const body = { name, base_url: baseUrl, api_key: apiKey, namespace, flux_namespace_token: fluxToken || '' };
+  feedback.className = 'config-feedback';
+  try {
+    const resp = await fetch('/api/connector-manager/connectors/i3x', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (resp.ok) {
+      feedback.textContent = `✓ Source added (ID: ${data.source_id})`;
+      feedback.className = 'config-feedback ok';
+      document.getElementById('ixName').value = '';
+      document.getElementById('ixBaseUrl').value = '';
+      document.getElementById('ixApiKey').value = '';
+      document.getElementById('ixNamespace').value = '';
+      document.getElementById('ixFluxToken').value = '';
+      loadConnectorStatus();
+    } else {
+      feedback.textContent = data.error || `Error ${resp.status}`;
+      feedback.className = 'config-feedback err';
+    }
+  } catch(e) {
+    feedback.textContent = 'Network error';
+    feedback.className = 'config-feedback err';
+  }
 }
 
 async function addNamedSource() {

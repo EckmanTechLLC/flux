@@ -1,9 +1,11 @@
 use anyhow::{Context, Result};
 use connector_manager::api::{create_router, ApiState};
 use connector_manager::generic_config::GenericConfigStore;
+use connector_manager::i3x_config::I3xConfigStore;
 use connector_manager::manager::ConnectorManager;
 use connector_manager::named_config::NamedConfigStore;
 use connector_manager::runners::generic::GenericRunner;
+use connector_manager::runners::i3x::I3xRunner;
 use connector_manager::runners::named::{NamedRunner, TapCatalogStore};
 use flux::credentials::CredentialStore;
 use std::sync::Arc;
@@ -37,6 +39,9 @@ async fn main() -> Result<()> {
     let named_config_db = std::env::var("NAMED_CONFIG_DB")
         .unwrap_or_else(|_| "named_config.db".to_string());
 
+    let i3x_config_db = std::env::var("I3X_CONFIG_DB")
+        .unwrap_or_else(|_| "/data/i3x_config.db".to_string());
+
     let api_port: u16 = std::env::var("CONNECTOR_API_PORT")
         .unwrap_or_else(|_| "3001".to_string())
         .parse()
@@ -47,6 +52,7 @@ async fn main() -> Result<()> {
         credentials_db = %credentials_db,
         generic_config_db = %generic_config_db,
         named_config_db = %named_config_db,
+        i3x_config_db = %i3x_config_db,
         api_port = api_port,
         "Configuration loaded"
     );
@@ -115,6 +121,35 @@ async fn main() -> Result<()> {
         }
     }
 
+    // Initialize i3X config store
+    let i3x_config_store = Arc::new(
+        I3xConfigStore::new(&i3x_config_db)
+            .context("Failed to initialize i3X config store")?,
+    );
+    info!("i3X config store initialized");
+
+    // Initialize i3X runner
+    let i3x_runner = Arc::new(I3xRunner::new(flux_api_url.clone()));
+
+    // Restart any persisted i3X sources from a previous session
+    let persisted_i3x = i3x_config_store
+        .list()
+        .context("Failed to list persisted i3X sources")?;
+    if !persisted_i3x.is_empty() {
+        info!(count = persisted_i3x.len(), "Restarting persisted i3X sources");
+        for config in &persisted_i3x {
+            let api_key = credential_store
+                .get("i3x", &config.id)
+                .ok()
+                .flatten()
+                .map(|c| c.access_token)
+                .unwrap_or_default();
+            if let Err(e) = i3x_runner.start_source(config, api_key).await {
+                warn!(source_id = %config.id, name = %config.name, error = %e, "Failed to restart i3X source");
+            }
+        }
+    }
+
     // Initialize tap catalog store (load from disk if cached, else empty)
     let tap_catalog_path = std::env::var("TAP_CATALOG_CACHE")
         .unwrap_or_else(|_| "/tmp/flux-tap-catalog.json".to_string());
@@ -144,6 +179,8 @@ async fn main() -> Result<()> {
         credential_store: Arc::clone(&credential_store),
         tap_catalog: Arc::clone(&tap_catalog),
         named_runner: Arc::clone(&named_runner),
+        i3x_config_store: Arc::clone(&i3x_config_store),
+        i3x_runner: Arc::clone(&i3x_runner),
     };
     let router = create_router(api_state);
     let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", api_port))
