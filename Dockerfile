@@ -24,6 +24,9 @@ RUN apt-get update && apt-get install -y \
 # Copy binary from builder
 COPY --from=builder /app/target/release/flux /usr/local/bin/flux
 
+# Copy default config
+COPY config.toml /config.toml
+
 # Expose HTTP/WebSocket port
 EXPOSE 3000
 
