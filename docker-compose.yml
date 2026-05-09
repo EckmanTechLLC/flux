@@ -12,11 +12,16 @@ services:
     networks:
       - flux-network
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "100m"
+        max-file: "5"
     deploy:
       resources:
         limits:
-          cpus: '0.5'
-          memory: 256M
+          cpus: '1.0'
+          memory: 1G
 
   # Flux Service - State engine + APIs
   flux:
@@ -44,11 +49,16 @@ services:
     depends_on:
       - nats
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "100m"
+        max-file: "5"
     deploy:
       resources:
         limits:
-          cpus: '1.0'
-          memory: 512M
+          cpus: '3.0'
+          memory: 8G
 
   # Flux UI - Web interface
   flux-ui:
@@ -67,6 +77,11 @@ services:
     depends_on:
       - flux
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "100m"
+        max-file: "5"
     deploy:
       resources:
         limits:
@@ -92,6 +107,11 @@ services:
     depends_on:
       - flux
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "100m"
+        max-file: "5"
     deploy:
       resources:
         limits:
