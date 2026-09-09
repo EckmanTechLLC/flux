@@ -911,6 +911,13 @@ Only a *trailing* star is a wildcard; a `*` elsewhere is treated literally.
 Send multiple `subscribe` messages to combine patterns — they are additive.
 
 Deletions (`entity_deleted`) honour the same patterns as updates.
+
+**Expect a burst before your subscription takes effect.** A connection with no
+subscriptions yet receives *everything* — so between the socket opening and the
+server processing your first `subscribe`, unrelated updates arrive. On a busy
+instance that is easily a dozen messages. This is existing behaviour (no
+subscriptions means firehose), not a bug, but a client scoped to one namespace
+should filter or discard what arrives before its own subscribe is acknowledged.
 - Multiple subscriptions allowed.
 
 ---
