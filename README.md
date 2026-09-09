@@ -31,7 +31,6 @@ Consumers observe Flux's canonical state. They never see raw events.
 **Services (Docker Compose):**
 - `nats` — JetStream event backbone (internal transport only)
 - `flux` — State engine + HTTP/WebSocket API
-- `flux-ui` — Web monitoring and management UI
 - `connector-manager` — Polls external APIs (GitHub, etc.), publishes events to Flux
 
 ## Use Cases (Domain-Agnostic)
@@ -109,8 +108,8 @@ docker compose down
 
 **Ports:**
 - Flux API: `http://localhost:3000`
-- Flux UI: `http://localhost:8082`
 - NATS (external): `localhost:4223`
+- Connector Manager: `http://localhost:3001` (loopback only)
 
 > **Note on startup time:** On first start (and after restarts), Flux replays all events from NATS JetStream to rebuild state. This is expected behavior, not a bug. Replay time scales with event history — snapshots are used to reduce replay window.
 
@@ -282,21 +281,21 @@ curl http://localhost:3000/api/connectors
 curl http://localhost:3000/api/connectors/github
 ```
 
-## Web UI
+## Management
 
-Flux UI runs as a Docker container (included in `docker-compose.yml`).
+There is no web UI. `flux-ui` was retired in ADR-013: it carried a path traversal, an
+unauthenticated proxy to connector-manager, and dead load-test endpoints that shelled out
+over SSH to retired infrastructure.
+
+Connectors and namespaces are managed over the API. connector-manager is published on
+loopback only, so reach it from the host:
 
 ```bash
-docker compose up -d flux-ui
+curl localhost:3001/api/connectors
 ```
 
-Access at `http://localhost:8082`.
-
-**Features:**
-- Real-time metrics (EPS, entity count, active publishers)
-- Live entity viewer with grouping and filtering
-- Connector management (OAuth setup, enable/disable, status)
-- Admin config panel
+Note that connector-manager has no authentication of its own — loopback is the boundary.
+Do not publish it more widely without adding auth first.
 
 ## Integrations
 

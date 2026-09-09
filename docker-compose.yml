@@ -64,34 +64,6 @@ services:
           cpus: '3.0'
           memory: 8G
 
-  # Flux UI - Web interface
-  flux-ui:
-    build:
-      context: ./ui
-      dockerfile: Dockerfile
-    container_name: flux-ui
-    environment:
-      - FLUX_API=http://flux:3000
-      - FLUX_WS=ws://flux:3000/api/ws
-      - CONNECTOR_MANAGER_API=http://connector-manager:3001
-    ports:
-      - "8082:8082"
-    networks:
-      - flux-network
-    depends_on:
-      - flux
-    restart: unless-stopped
-    logging:
-      driver: json-file
-      options:
-        max-size: "100m"
-        max-file: "5"
-    deploy:
-      resources:
-        limits:
-          cpus: '0.25'
-          memory: 128M
-
   # Connector Manager - Runs scheduled connectors (GitHub, etc.)
   connector-manager:
     build:
@@ -106,6 +78,12 @@ services:
       - NAMED_CONFIG_DB=/data/named_config.db
     volumes:
       - ./data:/data
+    # ADR-013: loopback only. Reachable via `curl localhost:3001` over SSH, never
+    # from the LAN or the tunnel. connector-manager has NO authentication of its own
+    # (api.rs:406) and its Singer runner spawns tap_name as a command — until that
+    # changes, loopback is the boundary.
+    ports:
+      - "127.0.0.1:3001:3001"
     networks:
       - flux-network
     depends_on:

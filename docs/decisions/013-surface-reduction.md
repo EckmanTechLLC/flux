@@ -1,6 +1,6 @@
 # ADR-013: Surface Reduction — flux-ui Retirement
 
-**Status:** Proposed
+**Status:** Accepted
 **Date:** 2026-09-09
 **Extends:** ADR-006 (Security Hardening), ADR-007 (Universal Connector Framework)
 

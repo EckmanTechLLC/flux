@@ -140,8 +140,7 @@ These were in early design docs but deemed unnecessary (2026-02-14):
 - NATS client: 4223 (external) / 4222 (internal Docker network)
 - NATS monitoring: 8223
 - Flux API (HTTP + WebSocket): 3000
-- Flux UI: 8082
-- Connector Manager API: 3001 (internal only)
+- Connector Manager API: 3001 (loopback only — `curl localhost:3001` over SSH; ADR-013)
 
 **VM Ownership (changed 2026-09-09):**
 - Claude has SSH + passwordless sudo on .107 (`ssh etl@192.168.50.107`) and owns the VM.
@@ -157,7 +156,6 @@ These were in early design docs but deemed unnecessary (2026-02-14):
 - Commands (run from /home/etl/projects/flux):
   - `flux`: `docker compose build --no-cache flux && docker compose up -d flux`
   - `connector-manager`: `docker compose build --no-cache connector-manager && docker compose up -d connector-manager`
-  - `flux-ui`: `docker compose build --no-cache flux-ui && docker compose up -d flux-ui`
   - All: `docker compose build --no-cache && docker compose up -d`
   - `nats`: `docker compose up -d nats` (stock image, no build)
 
