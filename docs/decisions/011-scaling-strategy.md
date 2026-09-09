@@ -88,6 +88,55 @@ Container logs on .107 grew to ~20 GB unbounded. This was avoidable.
 - After any restart: confirm entity count matches baseline; if not, restore from backup and investigate.
 - Quick wins captured in Task 01 (container limits + log rotation) implement decisions 1 and 6 above.
 
+## Amendment — 2026-09-09
+
+Two gaps found the hard way during the reliability audit.
+
+### A1. Disk is a trigger, and it is coupled to event retention
+
+The trigger table had no disk row. It should have: **JetStream derives `max_storage`
+from free disk at startup**, so disk pressure silently shrinks the event-retention
+window, and past a threshold prevents the stream from loading at all.
+
+On 2026-09-09 the VM reached 92% (48 GB of it an unrelated project, 10 GB a runaway
+syslog). `max_storage` fell from the 43 GB recorded in this ADR to **9.30 GB** — below
+the stream's own 10 GB `max_bytes` — and NATS refused to restore `FLUX_EVENTS`:
+
+```
+Error recreating stream "FLUX_EVENTS": insufficient storage resources available (10047)
+```
+
+Flux crash-looped and the public API returned 502 until disk was freed. No data was
+lost, but **any** NATS restart past that threshold would have done it, unattended and
+at any hour.
+
+| Trigger | Threshold | Follow-up |
+|---|---|---|
+| Root filesystem usage | > 80% | Reclaim space; identify the consumer before assuming it is Flux |
+| Free disk vs. stream ceiling | `max_storage` < 2× `max_bytes` | Free disk or lower `FLUX_NATS_MAX_BYTES` |
+
+Addressed in code (commit `7c07908`): `max_bytes` default lowered 10 GB → 5 GB,
+`ensure_stream` now reconciles config on an existing stream rather than returning
+early, and a startup preflight names both numbers when the ceiling exceeds available
+storage.
+
+### A2. Memory triggers must name their metric
+
+Decision 4's memory triggers do not say *which* memory number they mean, and the two
+available disagree by a factor of four. On 2026-09-09 Proxmox reported 30.89 GB of
+36 GB for the Flux VM while the guest reported 6.7 GB used, 24 GB buff/cache,
+28 GB available.
+
+Both are correct. Proxmox counts pages the guest has *touched*; Linux never returns
+page-cache pages without a balloon driver doing free-page-reporting, and this VM
+churns disk hard (NATS append, a 5 MB snapshot every 5 minutes, journald). The
+hypervisor figure ratchets up and effectively never falls.
+
+**Policy:** all memory triggers in decision 4 refer to the **guest's own `used`
+figure** — `free -h` used, or `psutil.virtual_memory().used`, as published by
+`flux-core/vm`. Hypervisor-reported memory is not a trigger and should not be
+treated as one.
+
 ## References
 
 - ADR-001: State Engine Architecture
