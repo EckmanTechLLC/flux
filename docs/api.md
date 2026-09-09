@@ -290,6 +290,17 @@ GET /api/state/entities HTTP/1.1
 
 - `?namespace=matt` - Filter by namespace
 - `?prefix=matt/sensor` - Filter by entity ID prefix
+- `?limit=100` - Maximum entities to return
+- `?after=matt/sensor-05` - Cursor; returns entities sorting strictly after this id
+- `?properties=temperature,unit` - Return only these properties
+
+With no parameters the response is every entity with every property, unchanged —
+on a large instance that can be tens of megabytes, so prefer `limit` with `after`.
+
+When `limit` or `after` is present, results are sorted by id, which makes paging
+stable: pass the last id of a page as the next `after` and no entity is skipped
+or repeated. Sorting is skipped entirely when neither is present, so the
+unpaginated path keeps its previous cost.
 
 **Response (200 OK):**
 
@@ -311,6 +322,10 @@ GET /api/state/entities HTTP/1.1
 ```bash
 curl http://localhost:3000/api/state/entities
 curl "http://localhost:3000/api/state/entities?namespace=matt"
+
+# Page through a namespace 100 at a time, fetching only two properties
+curl "http://localhost:3000/api/state/entities?namespace=matt&limit=100&properties=temperature,unit"
+curl "http://localhost:3000/api/state/entities?namespace=matt&limit=100&after=matt/sensor-099"
 ```
 
 ---
@@ -880,7 +895,22 @@ Subscribe to updates for a specific entity.
 }
 ```
 
-- `entity_id`: Use `"*"` to subscribe to all entities.
+- `entity_id`: an exact entity id, a trailing-`*` pattern, or `"*"` for everything.
+
+**Patterns.** A trailing `*` matches by prefix, so a consumer can take one
+namespace instead of the whole instance:
+
+| Pattern | Matches |
+|---|---|
+| `flux-crypto/bitcoin` | that entity only |
+| `flux-crypto/*` | every entity in `flux-crypto` |
+| `flux-*` | every namespace beginning `flux-` |
+| `*` | everything |
+
+Only a *trailing* star is a wildcard; a `*` elsewhere is treated literally.
+Send multiple `subscribe` messages to combine patterns — they are additive.
+
+Deletions (`entity_deleted`) honour the same patterns as updates.
 - Multiple subscriptions allowed.
 
 ---

@@ -110,9 +110,15 @@ impl ConnectionManager {
                 result = deletion_rx.recv() => {
                     match result {
                         Ok(deleted) => {
-                            if let Err(e) = self.send_entity_deleted(&mut socket, deleted).await {
-                                error!(error = %e, "Failed to send entity deleted");
-                                break;
+                            // Deletions were previously sent to every connection
+                            // regardless of subscription, unlike updates. A
+                            // consumer scoped to one namespace should not be told
+                            // about deletions in another.
+                            if self.matches(&deleted.entity_id) {
+                                if let Err(e) = self.send_entity_deleted(&mut socket, deleted).await {
+                                    error!(error = %e, "Failed to send entity deleted");
+                                    break;
+                                }
                             }
                         }
                         Err(broadcast::error::RecvError::Lagged(skipped)) => {
@@ -159,20 +165,34 @@ impl ConnectionManager {
         Ok(())
     }
 
+    /// Check whether this connection wants events for `entity_id`.
+    ///
+    /// Matching, in order:
+    /// - no subscriptions at all → everything (unchanged default)
+    /// - `*` → everything (unchanged)
+    /// - an exact entity id (unchanged)
+    /// - a trailing-`*` pattern, e.g. `flux-crypto/*` or `flux-*`
+    ///
+    /// The trailing-wildcard form is what lets a consumer take one namespace
+    /// instead of the whole world. Without it, observer-gene had to subscribe to
+    /// `*` and discard ~59k entities' updates client-side.
+    fn matches(&self, entity_id: &str) -> bool {
+        if self.subscriptions.is_empty() || self.subscriptions.contains("*") {
+            return true;
+        }
+        if self.subscriptions.contains(entity_id) {
+            return true;
+        }
+        self.subscriptions.iter().any(|pattern| {
+            pattern
+                .strip_suffix('*')
+                .is_some_and(|prefix| entity_id.starts_with(prefix))
+        })
+    }
+
     /// Check if update should be forwarded to this connection
     fn should_forward_update(&self, update: &StateUpdate) -> bool {
-        // If no subscriptions, forward all updates
-        if self.subscriptions.is_empty() {
-            return true;
-        }
-
-        // Check for wildcard subscription
-        if self.subscriptions.contains("*") {
-            return true;
-        }
-
-        // Otherwise, only forward if subscribed to this entity
-        self.subscriptions.contains(&update.entity_id)
+        self.matches(&update.entity_id)
     }
 
     /// Send state update to client
@@ -215,5 +235,69 @@ impl ConnectionManager {
 impl Default for ConnectionManager {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn mgr(patterns: &[&str]) -> ConnectionManager {
+        let mut m = ConnectionManager::new();
+        for p in patterns {
+            m.subscriptions.insert((*p).to_string());
+        }
+        m
+    }
+
+    #[test]
+    fn no_subscriptions_matches_everything() {
+        assert!(mgr(&[]).matches("flux-crypto/bitcoin"));
+    }
+
+    #[test]
+    fn wildcard_matches_everything() {
+        assert!(mgr(&["*"]).matches("anything/at-all"));
+    }
+
+    #[test]
+    fn exact_id_still_works() {
+        let m = mgr(&["flux-crypto/bitcoin"]);
+        assert!(m.matches("flux-crypto/bitcoin"));
+        assert!(!m.matches("flux-crypto/ethereum"));
+    }
+
+    #[test]
+    fn namespace_prefix_scopes_to_one_namespace() {
+        let m = mgr(&["flux-crypto/*"]);
+        assert!(m.matches("flux-crypto/bitcoin"));
+        assert!(m.matches("flux-crypto/ethereum"));
+        assert!(!m.matches("flux-weather/london"));
+    }
+
+    #[test]
+    fn broad_prefix_matches_across_namespaces() {
+        // observer-gene's actual filter: every flux-* namespace, nothing else.
+        let m = mgr(&["flux-*"]);
+        assert!(m.matches("flux-ships-thames/MMSI-1"));
+        assert!(m.matches("flux-weather/london"));
+        assert!(!m.matches("knowledge-gene/steer"));
+    }
+
+    #[test]
+    fn prefix_and_exact_combine() {
+        // observer-gene wants all flux-* plus one specific foreign entity.
+        let m = mgr(&["flux-*", "knowledge-gene/steer"]);
+        assert!(m.matches("flux-crypto/bitcoin"));
+        assert!(m.matches("knowledge-gene/steer"));
+        assert!(!m.matches("knowledge-gene/state"));
+    }
+
+    #[test]
+    fn bare_star_inside_a_pattern_is_not_a_prefix_match() {
+        // Only a TRAILING star is a wildcard; this must not match everything.
+        let m = mgr(&["flux-crypto/*"]);
+        assert!(!m.matches("other/flux-crypto/x"));
     }
 }
