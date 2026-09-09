@@ -1,6 +1,6 @@
 # ADR-012: Connector Reliability and Liveness
 
-**Status:** Proposed
+**Status:** Accepted
 **Date:** 2026-09-09
 **Extends:** ADR-011 (Scaling Strategy)
 
@@ -89,11 +89,26 @@ When an upstream change forces a property-schema change, publish both old and ne
 defined overlap window, as was done for flux-weather. Consumers such as gene-observer are not
 coordinated with Flux deploys and must never be broken by one.
 
-### 9. Sources become a versioned repository
+### 9. The library is versioned; the sources are not
 
-Sixteen directories of untracked production code with no history is how both the rsync `.env`
-clobber and the token swap happened. Version control is also a prerequisite for rolling a
-shared module across 16 services safely.
+*Superseded 2026-09-09 by the operator.* The original decision put all 16 source
+directories under version control. That conflates two different things.
+
+Sources are **applications** — deployment-specific, and in a public repo they would amount
+to publishing one operator's particular choices as though they were part of Flux. Anyone
+running Flux picks their own. They stay untracked in `/home/etl/flux-*`.
+
+`fluxsource` is **infrastructure** — the runtime every source needs and which has repeatedly
+been got wrong when hand-copied. It ships in this repo at `clients/python/fluxsource.py`,
+alongside the existing Python examples, and is useful to anyone building a source rather
+than only to us.
+
+Sources import it by path: `PYTHONPATH=/home/etl/flux/clients/python`, so a `git pull`
+updates every source at once without touching any of them.
+
+The rsync hazards that motivated the original decision (`.env` clobber, token swap) are
+already handled by `flux-deploy`, which hardcodes `--exclude='.env'` and captures tokens
+from the journal rather than by hand.
 
 ## Constraints
 
