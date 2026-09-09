@@ -122,6 +122,7 @@ class FluxSource:
         self.timeout = timeout
         self._admin_token = admin_token if admin_token is not None else os.environ.get("FLUX_ADMIN_TOKEN", "")
         self._poll_interval: float | None = None
+        self._heartbeat_period: float | None = None
         self.token = token if token is not None else os.environ.get("FLUX_NAMESPACE_TOKEN", "")
         if not self.token:
             self.token = self._provision()
@@ -290,7 +291,14 @@ class FluxSource:
             # Published so a monitor can derive a staleness threshold from the
             # namespace itself rather than from a separate config that drifts
             # out of step with the source (ADR-012 decision 6).
+            #
+            # heartbeat_period_s is the one a monitor must use: it is what
+            # actually bounds how stale this namespace can get. poll_interval_s
+            # alone is wrong for fast pollers — a 60s poller whose heartbeat
+            # fires every 300s would look stale on a 3x60s threshold almost
+            # continuously.
             props["poll_interval_s"] = self._poll_interval
+            props["heartbeat_period_s"] = self._heartbeat_period
         props.update(fields)
         self.publish(HEARTBEAT_ENTITY, props)
 
@@ -317,6 +325,9 @@ class FluxSource:
             raise FatalSourceError("run() called with no feeds")
 
         self._poll_interval = poll_interval
+        # The heartbeat timer is only checked between cycles, so the real
+        # guaranteed-update period is the larger of the two.
+        self._heartbeat_period = max(poll_interval, heartbeat_interval)
         state = state if state is not None else {}
         total_failure_cycles = 0
         next_heartbeat = 0.0

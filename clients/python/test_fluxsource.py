@@ -223,3 +223,28 @@ class TestHeartbeatAdvertisesCadence(unittest.TestCase):
         src.publish = lambda k, p: (published.update({k: p}), True)[1]
         src.publish_heartbeat()
         self.assertNotIn("poll_interval_s", published["_heartbeat"])
+
+
+class TestHeartbeatPeriod(unittest.TestCase):
+    """heartbeat_period_s must reflect what actually bounds staleness."""
+
+    def _run_once(self, poll_interval, heartbeat_interval=300):
+        src = make_source()
+        published = {}
+        src.publish = lambda k, p: (published.update({k: p}), True)[1]
+        with mock.patch("fluxsource.time.sleep", side_effect=StopLoop):
+            with self.assertRaises(StopLoop):
+                src.run([lambda s, st: False], poll_interval=poll_interval,
+                        heartbeat_interval=heartbeat_interval)
+        return published["_heartbeat"]
+
+    def test_fast_poller_reports_the_heartbeat_interval(self):
+        # 60s polls but a 300s heartbeat: a 3x60s threshold would alert almost
+        # continuously. The period must be 300, not 60.
+        hb = self._run_once(poll_interval=60)
+        self.assertEqual(hb["poll_interval_s"], 60)
+        self.assertEqual(hb["heartbeat_period_s"], 300)
+
+    def test_slow_poller_reports_the_poll_interval(self):
+        hb = self._run_once(poll_interval=3600)
+        self.assertEqual(hb["heartbeat_period_s"], 3600)
