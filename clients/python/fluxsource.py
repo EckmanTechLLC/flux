@@ -301,6 +301,11 @@ class FluxSource:
         failed for `max_total_failure_cycles` consecutive cycles the process exits
         non-zero, so systemd restarts it and the failure becomes visible instead
         of the loop spinning silently forever.
+
+        `heartbeat_interval` is checked between cycles, so its EFFECTIVE period is
+        `max(poll_interval, heartbeat_interval)`. An hourly poller heartbeats hourly
+        no matter what is passed here. Staleness alerting must therefore expect a
+        source's poll interval, not this value.
         """
         if not feeds:
             raise FatalSourceError("run() called with no feeds")
