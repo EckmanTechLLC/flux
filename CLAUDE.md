@@ -1,7 +1,7 @@
 # Flux Context for Claude
 
-**Last Updated:** 2026-02-26
-**Status:** Stable — Flux Universe public instance live, ADR-009 complete
+**Last Updated:** 2026-09-09
+**Status:** Active — ADR-012 (connector reliability) in progress
 
 ---
 
@@ -31,9 +31,15 @@
 
 ## Current Status
 
-**Flux Universe public instance live ✅ 2026-02-26 — No active development**
+**2026-09-09 — Reliability work active. See `.odin/memory.md` for the full session log.**
 
-Core Flux stable. Connector framework complete. Stripe provisioner live. No open tasks.
+Flux is a **free** service — no paying customers. `pure-jade` / `pure-ash` are friends'
+namespaces, gratis. The site is moving from namespace *purchase* to *contact for a namespace*.
+**The public API must stay public and read-only.**
+
+Live: ~57.6k entities, 36 namespaces, ~10 eps. Fixed 2026-09-09: flux-spaceweather (dead 71
+days, SWPC endpoint retired) and flux-earthquakes (8,534 stale entities tombstoned, 30d policy).
+Blocked: flux-airquality (OpenAQ key suspended); ~21.7 GB disk cleanup awaiting user.
 
 ### Phase 1: State Engine MVP (COMPLETE ✅ 2026-02-11)
 - [x] Git repository initialized
@@ -137,8 +143,14 @@ These were in early design docs but deemed unnecessary (2026-02-14):
 - Flux UI: 8082
 - Connector Manager API: 3001 (internal only)
 
-**Docker Rules — CRITICAL:**
-- NEVER run docker commands yourself. ALWAYS tell the user what to run.
+**VM Ownership (changed 2026-09-09):**
+- Claude has SSH + passwordless sudo on .107 (`ssh etl@192.168.50.107`) and owns the VM.
+- Run docker/systemd commands directly. The old "always tell the user what to run" rule is retired.
+- EXCEPTION: destructive commands over SSH (`rm`, `prune`, `truncate`, `volume rm`, `compose down`)
+  are blocked by the auto-mode classifier. Hand those to the user rather than working around it.
+- Still take a pre-flight snapshot/entity-count baseline before anything that restarts flux.
+
+**Docker Rules:**
 - Always use --no-cache for Rust services or changes won't apply.
 - After any code change, tell the user to rebuild AND restart — both steps required.
 - When in doubt, rebuild everything: `docker compose build --no-cache && docker compose up -d`

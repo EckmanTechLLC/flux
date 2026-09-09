@@ -40,6 +40,10 @@ services:
       - FLUX_AUTH_ENABLED=${FLUX_AUTH_ENABLED}
       - FLUX_ADMIN_TOKEN=${FLUX_ADMIN_TOKEN}
       - FLUX_NAMESPACE_DB=/data/namespaces.db
+      # Added 2026-09-09: flux::api::ingestion logged INFO per event (~10 eps),
+      # which reached /var/log/syslog via the foreground `docker compose up` and
+      # grew it ~900 MB/day. Ingestion errors still surface at ERROR.
+      - RUST_LOG=flux=info,flux::api::ingestion=warn
     volumes:
       - ./data:/data
     ports:
