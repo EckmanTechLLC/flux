@@ -244,6 +244,37 @@ class FluxSource:
                  len(entities), len(stale), max_age_seconds / 3600, removed)
         return removed
 
+    def retire_absent(self, present_keys: Iterable[str], batch_size: int = 500) -> int:
+        """Tombstone entities whose key is not in `present_keys`.
+
+        For sources whose upstream publishes a complete current set each poll —
+        active storms, current alerts, open incidents — where absence means "over"
+        rather than "stale". Keys beginning with "_" are never retired.
+
+        Safety: an empty upstream set is a legitimate state (no active storms), so
+        this WILL clear the namespace when handed an empty collection. Only call it
+        after a successful fetch, never on the error path.
+        """
+        present = {str(k) for k in present_keys}
+        try:
+            entities = self.list_entities()
+        except Exception:  # noqa: BLE001
+            log.exception("retire_absent: could not list entities")
+            return 0
+
+        gone = []
+        for e in entities:
+            key = e["id"].split("/", 1)[-1]
+            if key.startswith("_") or key in present:
+                continue
+            gone.append(e["id"])
+
+        if not gone:
+            return 0
+        removed = self.delete_entities(gone, batch_size)
+        log.info("Retired %d entities no longer present upstream", removed)
+        return removed
+
     # -- liveness ----------------------------------------------------------
 
     def publish_heartbeat(self, **fields) -> None:

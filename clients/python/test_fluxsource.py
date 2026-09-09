@@ -163,3 +163,37 @@ class TestProvisioning(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class TestRetireAbsent(unittest.TestCase):
+    """Tombstone-on-absence, for upstreams that publish a complete current set."""
+
+    def _entities(self):
+        return [
+            {"id": "flux-test/al012026", "lastUpdated": "2026-09-09T00:00:00+00:00"},
+            {"id": "flux-test/al022026", "lastUpdated": "2026-09-09T00:00:00+00:00"},
+            {"id": "flux-test/_heartbeat", "lastUpdated": "2026-09-09T00:00:00+00:00"},
+        ]
+
+    def test_retires_only_what_is_gone(self):
+        src = make_source()
+        with mock.patch.object(src, "list_entities", return_value=self._entities()), \
+             mock.patch.object(src, "delete_entities", return_value=1) as delete:
+            src.retire_absent(["al012026"])
+        self.assertEqual(delete.call_args.args[0], ["flux-test/al022026"])
+
+    def test_empty_upstream_clears_data_but_spares_heartbeat(self):
+        # No active storms is a legitimate state — everything goes except liveness.
+        src = make_source()
+        with mock.patch.object(src, "list_entities", return_value=self._entities()), \
+             mock.patch.object(src, "delete_entities", return_value=2) as delete:
+            src.retire_absent([])
+        self.assertEqual(sorted(delete.call_args.args[0]),
+                         ["flux-test/al012026", "flux-test/al022026"])
+
+    def test_noop_when_everything_still_present(self):
+        src = make_source()
+        with mock.patch.object(src, "list_entities", return_value=self._entities()), \
+             mock.patch.object(src, "delete_entities") as delete:
+            self.assertEqual(src.retire_absent(["al012026", "al022026"]), 0)
+        delete.assert_not_called()
