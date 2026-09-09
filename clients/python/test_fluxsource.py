@@ -197,3 +197,29 @@ class TestRetireAbsent(unittest.TestCase):
              mock.patch.object(src, "delete_entities") as delete:
             self.assertEqual(src.retire_absent(["al012026", "al022026"]), 0)
         delete.assert_not_called()
+
+
+class TestHeartbeatAdvertisesCadence(unittest.TestCase):
+    """The heartbeat carries poll_interval_s so a monitor can derive a staleness
+    threshold from the namespace itself, rather than from a config that drifts."""
+
+    def test_poll_interval_is_published(self):
+        src = make_source()
+        published = {}
+        src.publish = lambda k, p: (published.update({k: p}), True)[1]
+
+        def quiet(src, state):
+            return False
+
+        with mock.patch("fluxsource.time.sleep", side_effect=StopLoop):
+            with self.assertRaises(StopLoop):
+                src.run([quiet], poll_interval=1800)
+
+        self.assertEqual(published["_heartbeat"]["poll_interval_s"], 1800)
+
+    def test_absent_before_run(self):
+        src = make_source()
+        published = {}
+        src.publish = lambda k, p: (published.update({k: p}), True)[1]
+        src.publish_heartbeat()
+        self.assertNotIn("poll_interval_s", published["_heartbeat"])

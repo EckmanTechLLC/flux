@@ -121,6 +121,7 @@ class FluxSource:
         self.url = (url or os.environ.get("FLUX_URL", "http://localhost:3000")).rstrip("/")
         self.timeout = timeout
         self._admin_token = admin_token if admin_token is not None else os.environ.get("FLUX_ADMIN_TOKEN", "")
+        self._poll_interval: float | None = None
         self.token = token if token is not None else os.environ.get("FLUX_NAMESPACE_TOKEN", "")
         if not self.token:
             self.token = self._provision()
@@ -285,6 +286,11 @@ class FluxSource:
         legitimately quiet" from "this source is broken".
         """
         props = {"last_cycle": datetime.now(timezone.utc).isoformat(), "source": self.source}
+        if self._poll_interval is not None:
+            # Published so a monitor can derive a staleness threshold from the
+            # namespace itself rather than from a separate config that drifts
+            # out of step with the source (ADR-012 decision 6).
+            props["poll_interval_s"] = self._poll_interval
         props.update(fields)
         self.publish(HEARTBEAT_ENTITY, props)
 
@@ -310,6 +316,7 @@ class FluxSource:
         if not feeds:
             raise FatalSourceError("run() called with no feeds")
 
+        self._poll_interval = poll_interval
         state = state if state is not None else {}
         total_failure_cycles = 0
         next_heartbeat = 0.0
