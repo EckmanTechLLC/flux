@@ -161,10 +161,6 @@ class TestProvisioning(unittest.TestCase):
                 fx.FluxSource(namespace="flux-test", source="t", url="http://flux.invalid")
 
 
-if __name__ == "__main__":
-    unittest.main(verbosity=2)
-
-
 class TestRetireAbsent(unittest.TestCase):
     """Tombstone-on-absence, for upstreams that publish a complete current set."""
 
@@ -248,3 +244,70 @@ class TestHeartbeatPeriod(unittest.TestCase):
     def test_slow_poller_reports_the_poll_interval(self):
         hb = self._run_once(poll_interval=3600)
         self.assertEqual(hb["heartbeat_period_s"], 3600)
+
+class TestRateLimitBackoff(unittest.TestCase):
+    """A 429 must follow the server's timing, not the generic retry ladder.
+
+    Retrying a 429 on the 1/2/4s ladder is how an API key gets suspended rather
+    than merely throttled — which is what happened to this project's OpenAQ key.
+    """
+
+    @staticmethod
+    def _resp(status, headers=None, payload=None):
+        r = mock.Mock()
+        r.status_code = status
+        r.headers = headers or {}
+        r.json.return_value = payload or {}
+        r.raise_for_status.return_value = None
+        return r
+
+    def test_retry_after_seconds_is_honoured(self):
+        slept = []
+        responses = [self._resp(429, {"Retry-After": "7"}),
+                     self._resp(200, payload={"ok": True})]
+        with mock.patch("fluxsource.requests.get", side_effect=responses), \
+             mock.patch("fluxsource.time.sleep", slept.append):
+            self.assertEqual(fx.get_json("http://x.invalid"), {"ok": True})
+        self.assertIn(7.0, slept, f"expected a 7s wait, slept {slept}")
+        self.assertNotIn(1.0, slept, "must not use the generic 1s ladder for a 429")
+
+    def test_x_ratelimit_reset_is_honoured_when_no_retry_after(self):
+        slept = []
+        responses = [self._resp(429, {"x-ratelimit-reset": "12"}),
+                     self._resp(200, payload={"ok": True})]
+        with mock.patch("fluxsource.requests.get", side_effect=responses), \
+             mock.patch("fluxsource.time.sleep", slept.append):
+            fx.get_json("http://x.invalid")
+        self.assertIn(12.0, slept)
+
+    def test_absurd_wait_gives_up_instead_of_parking_the_feed(self):
+        slept = []
+        with mock.patch("fluxsource.requests.get",
+                        return_value=self._resp(429, {"Retry-After": "99999"})), \
+             mock.patch("fluxsource.time.sleep", slept.append):
+            with self.assertRaises(Exception):
+                fx.get_json("http://x.invalid")
+        self.assertEqual(slept, [], "should not sleep for a wait beyond one cycle")
+
+    def test_429_without_timing_hint_does_not_burn_retries(self):
+        get = mock.Mock(return_value=self._resp(429, {}))
+        with mock.patch("fluxsource.requests.get", get), \
+             mock.patch("fluxsource.time.sleep"):
+            with self.assertRaises(Exception):
+                fx.get_json("http://x.invalid")
+        self.assertEqual(get.call_count, 1,
+                         "a 429 with no timing hint must not be retried blindly")
+
+    def test_non_429_errors_still_use_the_generic_ladder(self):
+        """Regression guard: ordinary transient failures must be unaffected."""
+        slept = []
+        good = self._resp(200, payload={"ok": True})
+        with mock.patch("fluxsource.requests.get",
+                        side_effect=[RuntimeError("boom"), good]), \
+             mock.patch("fluxsource.time.sleep", slept.append):
+            self.assertEqual(fx.get_json("http://x.invalid"), {"ok": True})
+        self.assertEqual(slept, [1.0])
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)

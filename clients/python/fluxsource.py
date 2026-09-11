@@ -60,6 +60,9 @@ MISSING = object()
 
 DEFAULT_TIMEOUT = 45
 DEFAULT_RETRIES = 3
+# Longest a 429 backoff may park a feed. Beyond this the feed gives up for this
+# cycle and retries on the next poll, rather than holding the process hostage.
+MAX_RATE_LIMIT_WAIT = 300.0
 HEARTBEAT_ENTITY = "_heartbeat"
 
 
@@ -97,6 +100,30 @@ def get_json(url: str, *, timeout: int = DEFAULT_TIMEOUT, retries: int = DEFAULT
     for attempt in range(1, retries + 1):
         try:
             resp = requests.get(url, timeout=timeout, headers=headers, params=params)
+
+            # A 429 is not a transient glitch — it is the server telling us we
+            # are over budget. Retrying it on the generic 1/2/4s ladder is how
+            # a key gets suspended rather than merely throttled (which is what
+            # happened to this project's OpenAQ key). Honour the server's own
+            # timing instead, and only if it fits in one poll cycle.
+            if resp.status_code == 429:
+                wait = _retry_after_seconds(resp)
+                last = requests.HTTPError(
+                    f"429 Too Many Requests for {url}", response=resp)
+                if attempt < retries and wait is not None and wait <= MAX_RATE_LIMIT_WAIT:
+                    log.warning("GET %s rate-limited (attempt %d/%d) — "
+                                "waiting %.0fs as instructed by the server",
+                                url, attempt, retries, wait)
+                    time.sleep(wait)
+                    continue
+                log.warning("GET %s rate-limited; giving up this cycle "
+                            "(server retry hint: %s)", url,
+                            f"{wait:.0f}s" if wait is not None else "none")
+                # break, not raise: raising here would be caught by the broad
+                # `except Exception` below and sent round the generic retry
+                # ladder — which is precisely the hammering being removed.
+                break
+
             resp.raise_for_status()
             return resp.json()
         except Exception as exc:  # noqa: BLE001 — deliberately broad; re-raised below
@@ -107,6 +134,38 @@ def get_json(url: str, *, timeout: int = DEFAULT_TIMEOUT, retries: int = DEFAULT
                           url, attempt, retries, exc, delay)
                 time.sleep(delay)
     raise last  # type: ignore[misc]
+
+
+def _retry_after_seconds(resp) -> float | None:
+    """Seconds to wait after a 429, from whichever header the API provides.
+
+    Checks `Retry-After` (RFC 9110, seconds or an HTTP date) and the widely used
+    `x-ratelimit-reset`, which may be seconds-remaining or a Unix epoch — the
+    encoding is not standardised, so a small number is read as a delay and a
+    large one as an absolute time. Returns None when nothing usable is present.
+    """
+    raw = resp.headers.get("Retry-After")
+    if raw is not None:
+        try:
+            return max(0.0, float(str(raw).strip()))
+        except (TypeError, ValueError):
+            try:
+                from email.utils import parsedate_to_datetime
+                when = parsedate_to_datetime(str(raw))
+                return max(0.0, when.timestamp() - time.time())
+            except Exception:  # noqa: BLE001 — unparseable date, fall through
+                pass
+
+    raw = resp.headers.get("x-ratelimit-reset")
+    if raw is None:
+        return None
+    try:
+        value = float(str(raw).strip())
+    except (TypeError, ValueError):
+        return None
+    if value <= 0:
+        return None
+    return value if value < 10_000 else max(0.0, value - time.time())
 
 
 class FluxSource:
